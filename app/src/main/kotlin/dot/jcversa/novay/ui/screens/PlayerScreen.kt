@@ -41,6 +41,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -167,7 +168,7 @@ fun PlayerScreen(
     var seasonsList by remember(activeAnime?.url) { mutableStateOf<List<AnimeSeason>>(listOf(activePlayingSeason)) }
     var episodes by remember(browsingSeason.url) { mutableStateOf<List<AnimeEpisode>?>(null) }
     var episodesError by remember(browsingSeason.url) { mutableStateOf<String?>(null) }
-    var episodeRetry by remember { mutableStateOf(0) }
+    var episodeRetry by remember { mutableIntStateOf(0) }
     var recommendations by remember { mutableStateOf<List<AnimeSearchResult>>(emptyList()) }
     var downloadedByEpisode by remember(browsingSeason.url) { mutableStateOf<Map<Int, Downloads.DownloadInfo>>(emptyMap()) }
     var resumePositions by remember(browsingSeason.url) { mutableStateOf<Map<Int, Long>>(emptyMap()) }

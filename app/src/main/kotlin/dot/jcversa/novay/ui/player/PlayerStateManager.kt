@@ -3,6 +3,8 @@ package dot.jcversa.novay.ui.player
 import android.content.Context
 import android.media.MediaCodec
 import android.view.LayoutInflater
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import androidx.annotation.OptIn
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
@@ -30,6 +32,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.mediacodec.MediaCodecRenderer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import dot.jcversa.novay.R
 import dot.jcversa.novay.data.AnimeEpisode
@@ -126,6 +129,11 @@ class PlayerStateManager(
     var videoAspectRatio by mutableFloatStateOf(MiniPlayerGeometry.DEFAULT_ASPECT_RATIO)
         private set
 
+    @androidx.annotation.VisibleForTesting
+    internal fun setVideoAspectRatioForTest(rawRatio: Float) {
+        videoAspectRatio = MiniPlayerGeometry.normalizeVideoAspectRatio(rawRatio)
+    }
+
     var audioTracks by mutableStateOf<List<PlayerTrackOption>>(emptyList())
         private set
 
@@ -204,7 +212,7 @@ class PlayerStateManager(
         override fun onVideoSizeChanged(videoSize: VideoSize) {
             if (videoSize.width > 0 && videoSize.height > 0) {
                 val rawRatio = (videoSize.width * videoSize.pixelWidthHeightRatio) / videoSize.height.toFloat()
-                videoAspectRatio = MiniPlayerGeometry.sanitizedAspectRatio(rawRatio)
+                videoAspectRatio = MiniPlayerGeometry.normalizeVideoAspectRatio(rawRatio)
             }
         }
 
@@ -257,6 +265,7 @@ class PlayerStateManager(
                     .build(),
                 /* handleAudioFocus = */ true,
             )
+            .setVideoScalingMode(C.VIDEO_SCALING_MODE_SCALE_TO_FIT)
             .setHandleAudioBecomingNoisy(true)
             .build()
             .also { player ->
@@ -268,7 +277,13 @@ class PlayerStateManager(
 
     fun createSinglePlayerView(context: Context): PlayerView {
         val inflated = LayoutInflater.from(context)
-            .inflate(R.layout.novay_player_view, null, false) as PlayerView
+            .inflate(R.layout.novay_player_view, FrameLayout(context), false) as PlayerView
+        inflated.layoutParams = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT,
+        )
+        inflated.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+        inflated.setEnableComposeSurfaceSyncWorkaround(true)
         inflated.player = getOrCreatePlayer()
         inflated.useController = false
         return inflated

@@ -10,8 +10,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.annotation.OptIn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -55,6 +57,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.ui.AspectRatioFrameLayout
 import dev.chrisbanes.haze.rememberHazeState
 import dot.jcversa.novay.ui.components.AnimateEntrance
 import dot.jcversa.novay.ui.components.NovayIcons
@@ -85,11 +89,14 @@ private data class VerticalFeedback(
  * intégré, le mini-lecteur flottant et le plein écran via `movableContentOf`
  * afin de ne jamais détruire ni recréer le décodeur vidéo.
  */
+@OptIn(UnstableApi::class)
 @Composable
 fun SinglePlayerViewHost(
     playerManager: PlayerStateManager,
     modifier: Modifier = Modifier,
 ) {
+    val presentationMode = playerManager.presentationMode
+    val videoAspectRatio = playerManager.videoAspectRatio
     AndroidView(
         factory = { ctx -> playerManager.createSinglePlayerView(ctx) },
         update = { view ->
@@ -97,6 +104,12 @@ fun SinglePlayerViewHost(
             if (view.player !== player) {
                 view.player = player
             }
+            if (view.resizeMode != AspectRatioFrameLayout.RESIZE_MODE_FIT) {
+                view.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+            }
+            // Déclenche une passe de mesure propre lors du changement de mode ou de ratio.
+            view.tag = presentationMode to videoAspectRatio
+            view.requestLayout()
         },
         onRelease = { view ->
             view.player = null
@@ -140,7 +153,8 @@ fun EmbeddedVideoPlayer(
         }
     }
 
-    val aspect = MiniPlayerGeometry.sanitizedAspectRatio(playerManager.videoAspectRatio)
+    val rawAspect = MiniPlayerGeometry.normalizeVideoAspectRatio(playerManager.videoAspectRatio)
+    val envelopeAspect = MiniPlayerGeometry.computeEmbeddedEnvelopeAspectRatio(rawAspect)
     val session = playerManager.session
     val stream = playerManager.stream
     val hasTracks = playerManager.audioTracks.size > 1 || playerManager.subtitleTracks.isNotEmpty()
@@ -148,17 +162,30 @@ fun EmbeddedVideoPlayer(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .aspectRatio(aspect)
+            .aspectRatio(envelopeAspect)
             .background(Color.Black)
             .testTag("embedded_video_player"),
     ) {
         if (showSurface) {
-            Box(
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
+                    .background(Color.Black)
                     .novayHazeSource(hazeState),
+                contentAlignment = Alignment.Center,
             ) {
-                videoSurfaceSlot()
+                val fitted = MiniPlayerGeometry.computeFittedVideoSize(
+                    containerWidth = maxWidth.value,
+                    containerHeight = maxHeight.value,
+                    videoAspectRatio = rawAspect,
+                )
+                Box(
+                    modifier = Modifier
+                        .size(width = fitted.width.dp, height = fitted.height.dp)
+                        .testTag("embedded_video_fitted_box"),
+                ) {
+                    videoSurfaceSlot()
+                }
             }
 
             // Gestes portrait non bloquants pour le défilement vertical :
@@ -650,18 +677,34 @@ fun FullscreenPlayerOverlay(
     val stream = playerManager.stream
     val hasTracks = playerManager.audioTracks.size > 1 || playerManager.subtitleTracks.isNotEmpty()
 
+    val rawAspect = MiniPlayerGeometry.normalizeVideoAspectRatio(playerManager.videoAspectRatio)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
             .testTag("fullscreen_video_player"),
     ) {
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .novayHazeSource(hazeState),
+                .background(Color.Black)
+                .novayHazeSource(hazeState)
+                .testTag("fullscreen_video_viewport"),
+            contentAlignment = Alignment.Center,
         ) {
-            videoSurfaceSlot()
+            val fitted = MiniPlayerGeometry.computeFittedVideoSize(
+                containerWidth = maxWidth.value,
+                containerHeight = maxHeight.value,
+                videoAspectRatio = rawAspect,
+            )
+            Box(
+                modifier = Modifier
+                    .size(width = fitted.width.dp, height = fitted.height.dp)
+                    .testTag("fullscreen_video_fitted_box"),
+            ) {
+                videoSurfaceSlot()
+            }
         }
 
         // Couche de gestes plein écran (taps, double-taps, seek horizontal, volume/luminosité, 2×)

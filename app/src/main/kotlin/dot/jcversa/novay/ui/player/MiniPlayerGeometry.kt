@@ -31,9 +31,14 @@ data class MiniPlayerSizePx(
     val height: Float,
 )
 
+data class FittedVideoSize(
+    val width: Float,
+    val height: Float,
+)
+
 /**
- * Maths pures de positionnement, collision aux bords sûrs, aimantation intelligente
- * aux coins les plus proches et détection de visibilité au défilement avec hystérésis.
+ * Maths pures de positionnement, dimensionnement Fit (CONTAIN) sans recadrage,
+ * collision aux bords sûrs, aimantation aux coins et hystérésis au défilement.
  */
 object MiniPlayerGeometry {
 
@@ -42,7 +47,7 @@ object MiniPlayerGeometry {
     const val RETURN_TO_INLINE_VISIBLE_THRESHOLD = 0.65f
     const val SNAP_VELOCITY_PROJECTION_SEC = 0.085f
 
-    /** Largeur responsive du mini-lecteur (dp), adaptée des petits écrans aux tablettes. */
+    /** Largeur responsive de référence du mini-lecteur (dp). */
     fun responsiveWidthDp(availableWidthDp: Float): Float = when {
         availableWidthDp <= 0f -> 172f
         availableWidthDp < 360f -> 156f
@@ -51,13 +56,92 @@ object MiniPlayerGeometry {
         else -> 236f
     }
 
-    /** Clamp le ratio d'aspect pour que le mini-lecteur garde une géométrie ergonomique. */
+    /**
+     * Préserve le ratio d'aspect vidéo réel (paysage, 4:3, portrait 9:16, cinémascope)
+     * en ne rejetant que les valeurs invalides ou corrompues.
+     */
+    fun normalizeVideoAspectRatio(rawRatio: Float): Float =
+        if (rawRatio.isFinite() && rawRatio > 0f) {
+            rawRatio.coerceIn(0.25f, 4.0f)
+        } else {
+            DEFAULT_ASPECT_RATIO
+        }
+
+    /** Ratio ergonomique pour les usages bornés (alias conservé pour rétro-compatibilité). */
     fun sanitizedAspectRatio(rawRatio: Float): Float =
         if (rawRatio.isFinite() && rawRatio > 0f) {
             rawRatio.coerceIn(1.25f, 2.25f)
         } else {
             DEFAULT_ASPECT_RATIO
         }
+
+    /**
+     * Calcule la plus grande boîte respectant exactement [videoAspectRatio] qui tient
+     * entièrement dans [containerWidth] × [containerHeight] (équivalent `ContentScale.Fit` /
+     * `RESIZE_MODE_FIT`), sans jamais rogner ni déformer l'image.
+     */
+    fun computeFittedVideoSize(
+        containerWidth: Float,
+        containerHeight: Float,
+        videoAspectRatio: Float,
+    ): FittedVideoSize {
+        if (containerWidth <= 0f || containerHeight <= 0f) {
+            return FittedVideoSize(width = 0f, height = 0f)
+        }
+        val safeVideoAspect = normalizeVideoAspectRatio(videoAspectRatio)
+        val containerAspect = containerWidth / containerHeight
+        return if (containerAspect > safeVideoAspect) {
+            // Conteneur plus large que la vidéo -> barres noires gauche/droite (pillarboxing)
+            FittedVideoSize(
+                width = containerHeight * safeVideoAspect,
+                height = containerHeight,
+            )
+        } else {
+            // Conteneur plus haut que la vidéo -> barres noires haut/bas (letterboxing)
+            FittedVideoSize(
+                width = containerWidth,
+                height = containerWidth / safeVideoAspect,
+            )
+        }
+    }
+
+    /** Ratio de l'enveloppe portrait intégrée (borne les vidéos verticales sans rogner). */
+    fun computeEmbeddedEnvelopeAspectRatio(videoAspectRatio: Float): Float =
+        normalizeVideoAspectRatio(videoAspectRatio).coerceIn(1.0f, 2.35f)
+
+    /** Dimensionne le mini-lecteur en préservant le ratio réel de la vidéo (y compris portrait). */
+    fun computeMiniPlayerSizeDp(
+        availableWidthDp: Float,
+        videoAspectRatio: Float,
+    ): FittedVideoSize {
+        val baseLandscapeWidth = responsiveWidthDp(availableWidthDp)
+        val safeAspect = normalizeVideoAspectRatio(videoAspectRatio)
+        return if (safeAspect >= 1f) {
+            val maxHeight = baseLandscapeWidth * 0.9f
+            val fitted = computeFittedVideoSize(
+                containerWidth = baseLandscapeWidth,
+                containerHeight = maxHeight,
+                videoAspectRatio = safeAspect,
+            )
+            FittedVideoSize(
+                width = fitted.width.coerceAtLeast(120f),
+                height = fitted.height.coerceAtLeast(72f),
+            )
+        } else {
+            // Vidéo portrait (ex. 9:16) : hauteur bornée et largeur ajustée au ratio exact
+            val maxHeight = baseLandscapeWidth * 1.15f
+            val fitted = computeFittedVideoSize(
+                containerWidth = baseLandscapeWidth,
+                containerHeight = maxHeight,
+                videoAspectRatio = safeAspect,
+            )
+            if (fitted.width < 108f) {
+                FittedVideoSize(width = 108f, height = 108f / safeAspect)
+            } else {
+                fitted
+            }
+        }
+    }
 
     /** Calcule le rectangle sûr de déplacement, en évitant encoches, dock et rail. */
     fun computeSafeBounds(

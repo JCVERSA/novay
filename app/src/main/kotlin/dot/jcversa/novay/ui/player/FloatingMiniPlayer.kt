@@ -92,9 +92,12 @@ fun FloatingMiniPlayer(
         val containerWidthPx = with(density) { maxWidth.toPx() }
         val containerHeightPx = with(density) { maxHeight.toPx() }
 
-        val miniWidthDp = MiniPlayerGeometry.responsiveWidthDp(maxWidth.value).dp
-        val ratio = MiniPlayerGeometry.sanitizedAspectRatio(playerManager.videoAspectRatio)
-        val miniHeightDp = miniWidthDp / ratio
+        val miniSizeDp = MiniPlayerGeometry.computeMiniPlayerSizeDp(
+            availableWidthDp = maxWidth.value,
+            videoAspectRatio = playerManager.videoAspectRatio,
+        )
+        val miniWidthDp = miniSizeDp.width.dp
+        val miniHeightDp = miniSizeDp.height.dp
         val miniSizePx = MiniPlayerSizePx(
             width = with(density) { miniWidthDp.toPx() },
             height = with(density) { miniHeightDp.toPx() },

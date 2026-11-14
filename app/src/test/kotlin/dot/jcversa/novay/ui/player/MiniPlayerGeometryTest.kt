@@ -156,4 +156,54 @@ class MiniPlayerGeometryTest {
             ) == PlayerPresentationMode.HIDDEN,
         )
     }
+
+    @Test
+    fun `normalizeVideoAspectRatio preserve 4_3, 16_9, portrait 9_16 et scope sans forcer 16_9`() {
+        assertEquals(4f / 3f, MiniPlayerGeometry.normalizeVideoAspectRatio(4f / 3f), 0.001f)
+        assertEquals(9f / 16f, MiniPlayerGeometry.normalizeVideoAspectRatio(9f / 16f), 0.001f)
+        assertEquals(2.39f, MiniPlayerGeometry.normalizeVideoAspectRatio(2.39f), 0.001f)
+        assertEquals(MiniPlayerGeometry.DEFAULT_ASPECT_RATIO, MiniPlayerGeometry.normalizeVideoAspectRatio(0f), 0.001f)
+        assertEquals(MiniPlayerGeometry.DEFAULT_ASPECT_RATIO, MiniPlayerGeometry.normalizeVideoAspectRatio(Float.NaN), 0.001f)
+    }
+
+    @Test
+    fun `computeFittedVideoSize encadre en Fit sans rognage pour 16_9, 4_3, portrait et ultrawide`() {
+        // 16:9 sur ecran paysage moderne 20:9 (2400 x 1080) -> barres noires gauche/droite
+        val fit169On209 = MiniPlayerGeometry.computeFittedVideoSize(2400f, 1080f, 16f / 9f)
+        assertEquals(1920f, fit169On209.width, 0.5f)
+        assertEquals(1080f, fit169On209.height, 0.5f)
+
+        // 4:3 sur ecran paysage 16:9 (1920 x 1080) -> barres noires gauche/droite
+        val fit43On169 = MiniPlayerGeometry.computeFittedVideoSize(1920f, 1080f, 4f / 3f)
+        assertEquals(1440f, fit43On169.width, 0.5f)
+        assertEquals(1080f, fit43On169.height, 0.5f)
+
+        // Video portrait 9:16 en plein ecran paysage (1920 x 1080) -> largeur 607.5, hauteur 1080 (zero rognage haut/bas)
+        val fitPortraitOnLandscape = MiniPlayerGeometry.computeFittedVideoSize(1920f, 1080f, 9f / 16f)
+        assertEquals(607.5f, fitPortraitOnLandscape.width, 0.5f)
+        assertEquals(1080f, fitPortraitOnLandscape.height, 0.5f)
+
+        // CinemaScope 2.39:1 sur ecran paysage 16:9 (1920 x 1080) -> barres noires haut/bas
+        val fitScopeOn169 = MiniPlayerGeometry.computeFittedVideoSize(1920f, 1080f, 2.39f)
+        assertEquals(1920f, fitScopeOn169.width, 0.5f)
+        assertEquals(1920f / 2.39f, fitScopeOn169.height, 0.5f)
+
+        // 16:9 sur ecran portrait (1080 x 2400) -> barres noires haut/bas
+        val fit169OnPortrait = MiniPlayerGeometry.computeFittedVideoSize(1080f, 2400f, 16f / 9f)
+        assertEquals(1080f, fit169OnPortrait.width, 0.5f)
+        assertEquals(607.5f, fit169OnPortrait.height, 0.5f)
+    }
+
+    @Test
+    fun `computeMiniPlayerSizeDp conserve le ratio reel sans tronquer les videos portrait ou 4_3`() {
+        val landscape169 = MiniPlayerGeometry.computeMiniPlayerSizeDp(412f, 16f / 9f)
+        assertEquals(16f / 9f, landscape169.width / landscape169.height, 0.02f)
+
+        val classic43 = MiniPlayerGeometry.computeMiniPlayerSizeDp(412f, 4f / 3f)
+        assertEquals(4f / 3f, classic43.width / classic43.height, 0.02f)
+
+        val vertical916 = MiniPlayerGeometry.computeMiniPlayerSizeDp(412f, 9f / 16f)
+        assertEquals(9f / 16f, vertical916.width / vertical916.height, 0.02f)
+        assertTrue(vertical916.width >= 108f)
+    }
 }
