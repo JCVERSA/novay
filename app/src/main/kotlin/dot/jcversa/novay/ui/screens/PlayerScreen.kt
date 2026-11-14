@@ -27,16 +27,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.outlined.BrightnessMedium
-import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.ScreenRotation
-import androidx.compose.material.icons.outlined.Speed
-import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -92,6 +82,7 @@ import dot.jcversa.novay.downloads.Downloads
 import dot.jcversa.novay.ui.components.AnimateEntrance
 import dot.jcversa.novay.ui.components.ErrorView
 import dot.jcversa.novay.ui.components.LoadingView
+import dot.jcversa.novay.ui.components.NovayIcons
 import dot.jcversa.novay.ui.components.NovayPlayPauseMorphIcon
 import dot.jcversa.novay.ui.components.bounceClick
 import dot.jcversa.novay.ui.components.novayCinemaGlass
@@ -254,7 +245,7 @@ private fun PlayerHeader(title: String, subtitle: String, onBack: () -> Unit) {
                 .testTag("player_header_back_button")
         ) {
             Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                imageVector = NovayIcons.Back,
                 contentDescription = "Retour",
                 tint = MaterialTheme.colorScheme.onSurface
             )
@@ -672,7 +663,7 @@ private fun PlayerContent(
                     .testTag("player_unlock_button")
             ) {
                 Icon(
-                    imageVector = Icons.Outlined.Lock,
+                    imageVector = NovayIcons.Lock,
                     contentDescription = "Déverrouiller les contrôles",
                     tint = overlays.videoControlsInk,
                     modifier = Modifier.size(24.dp)
@@ -723,9 +714,9 @@ private fun PlayerContent(
                 ) {
                     Icon(
                         imageVector = if (vf.isBrightness) {
-                            Icons.Outlined.BrightnessMedium
+                            NovayIcons.Brightness
                         } else {
-                            Icons.AutoMirrored.Filled.VolumeUp
+                            NovayIcons.Volume
                         },
                         contentDescription = null,
                         tint = overlays.videoControlsInk
@@ -810,7 +801,7 @@ private fun PlayerContent(
                             .testTag("player_back_button")
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            imageVector = NovayIcons.Back,
                             contentDescription = "Retour",
                             tint = overlays.videoControlsInk
                         )
@@ -844,7 +835,7 @@ private fun PlayerContent(
                             .testTag("player_lock_button")
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.Lock,
+                            imageVector = NovayIcons.Lock,
                             contentDescription = "Verrouiller les contrôles",
                             tint = overlays.videoControlsInk
                         )
@@ -866,7 +857,7 @@ private fun PlayerContent(
                             .testTag("player_rotate_button")
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.ScreenRotation,
+                            imageVector = NovayIcons.ScreenRotate,
                             contentDescription = "Rotation",
                             tint = overlays.videoControlsInk
                         )
@@ -879,7 +870,7 @@ private fun PlayerContent(
                                 .testTag("player_quality_button")
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.Tune,
+                                imageVector = NovayIcons.QualitySliders,
                                 contentDescription = "Qualité",
                                 tint = if (showQualities) {
                                     MaterialTheme.colorScheme.primary
@@ -896,7 +887,7 @@ private fun PlayerContent(
                             .testTag("player_speed_button")
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.Speed,
+                            imageVector = NovayIcons.SpeedGauge,
                             contentDescription = "Vitesse de lecture",
                             tint = if (showSpeed || playbackSpeed != 1f) {
                                 MaterialTheme.colorScheme.primary

@@ -1,5 +1,6 @@
 package dot.jcversa.novay.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -27,11 +28,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -60,9 +56,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
@@ -71,6 +72,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dot.jcversa.novay.data.AnimeSearchResult
 import dot.jcversa.novay.data.AnimeSource
+import dot.jcversa.novay.data.Library
+import dot.jcversa.novay.data.SearchHistory
+import dot.jcversa.novay.data.WatchHistory
 import dot.jcversa.novay.ui.LocalBottomChromePadding
 import dot.jcversa.novay.ui.components.AnimeComfortableGridItem
 import dot.jcversa.novay.ui.components.AppBarTitle
@@ -78,62 +82,131 @@ import dot.jcversa.novay.ui.components.EmptyScreen
 import dot.jcversa.novay.ui.components.ErrorView
 import dot.jcversa.novay.ui.components.LocalSlateMotion
 import dot.jcversa.novay.ui.components.NovayAppBar
+import dot.jcversa.novay.ui.components.NovayIcons
 import dot.jcversa.novay.ui.components.PosterGridSkeleton
 import dot.jcversa.novay.ui.components.PosterImage
 import dot.jcversa.novay.ui.components.ShimmerBox
 import dot.jcversa.novay.ui.components.novaySharedPoster
+import dot.jcversa.novay.ui.state.BROWSE_DISCOVERY_CHIPS
 import dot.jcversa.novay.ui.state.BrowseFeaturedState
+import dot.jcversa.novay.ui.state.BrowseSearchController
+import dot.jcversa.novay.ui.state.BrowseSearchDisplay
 import dot.jcversa.novay.ui.state.BrowseSearchState
 import dot.jcversa.novay.ui.theme.NovayTheme
 import dot.jcversa.novay.ui.theme.header
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-
-private val DISCOVERY_CHIPS = listOf("Shonen", "Seinen", "Action", "Isekai", "Romance", "Fantastique")
+import kotlinx.coroutines.withContext
 
 /**
- * Onglet Catalogue — Kowalski Motion, Parallax & Live Spotlight :
+ * Onglet Catalogue — Smart Search Suggestions, Kowalski Motion & Parallax :
  *  - barre supérieure connectée via nestedScroll ;
- *  - transitions AnimatedContent (< 220ms) entre Spotlight, chargement et résultats ;
- *  - parallaxe GPU liée au défilement sur la carte Spotlight héro ;
- *  - placement fluide animateItem() sur les résultats et le carrousel.
+ *  - suggestions intelligentes multi-sources (recherches récentes persistantes,
+ *    bibliothèque, historique, À la une et catalogue en direct avec debounce 280ms) ;
+ *  - transitions AnimatedContent (< 220ms) pilotées par [BrowseSearchDisplay] ;
+ *  - parallaxe GPU liée au défilement sur la carte Spotlight héro.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun BrowseScreen(
     source: AnimeSource,
-    onOpenShow: (AnimeSearchResult) -> Unit
+    onOpenShow: (AnimeSearchResult) -> Unit,
 ) {
     val motion = LocalSlateMotion.current
     val bottomChrome = LocalBottomChromePadding.current
-    var query by rememberSaveable { mutableStateOf("") }
-    var state by remember { mutableStateOf<BrowseSearchState>(BrowseSearchState.Idle) }
-    var featured by remember { mutableStateOf<BrowseFeaturedState>(BrowseFeaturedState.Loading) }
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val focusRequester = remember { FocusRequester() }
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
 
-    LaunchedEffect(source) {
-        featured = BrowseFeaturedState.Loading
-        featured = runCatching { source.featured() }
-            .getOrDefault(emptyList())
-            .let { list ->
-                if (list.isNotEmpty()) BrowseFeaturedState.Loaded(list) else BrowseFeaturedState.Unavailable
-            }
+    var savedQuery by rememberSaveable { mutableStateOf("") }
+    val controller = remember { BrowseSearchController() }
+
+    LaunchedEffect(Unit) {
+        controller.restoreSavedQueryIfNeeded(savedQuery)
+        val (recents, lib, hist) = withContext(Dispatchers.IO) {
+            Triple(
+                SearchHistory.recent(context),
+                Library.all(context),
+                WatchHistory.recent(context),
+            )
+        }
+        controller.updateLocalSources(recents, lib, hist)
     }
 
-    fun runSearch(explicitQuery: String = query) {
-        val q = explicitQuery.trim()
-        if (q.length < 2) return
-        if (explicitQuery != query) query = explicitQuery
+    LaunchedEffect(source) {
+        controller.featuredState = BrowseFeaturedState.Loading
+        val loaded = withContext(Dispatchers.IO) {
+            runCatching { source.featured() }.getOrDefault(emptyList())
+        }
+        controller.featuredState = if (loaded.isNotEmpty()) {
+            BrowseFeaturedState.Loaded(loaded)
+        } else {
+            BrowseFeaturedState.Unavailable
+        }
+    }
+
+    val displayMode = controller.searchDisplay
+    val liveLookupQuery = controller.trimmedQuery
+    LaunchedEffect(source, displayMode, liveLookupQuery) {
+        if (displayMode != BrowseSearchDisplay.TypingSuggestions || liveLookupQuery.length < 2) {
+            controller.setLiveLookupState(
+                loading = false,
+                results = if (liveLookupQuery.length < 2) emptyList() else null,
+            )
+            return@LaunchedEffect
+        }
+        controller.setLiveLookupState(loading = true)
+        delay(280L)
+        val live = withContext(Dispatchers.IO) {
+            runCatching { source.search(liveLookupQuery) }.getOrDefault(emptyList())
+        }
+        controller.setLiveLookupState(loading = false, results = live)
+    }
+
+    BackHandler(enabled = controller.canHandleBack) {
+        savedQuery = ""
+        focusManager.clearFocus()
+        keyboard?.hide()
+        controller.resetToSpotlight()
+    }
+
+    fun submitSearch(explicitQuery: String = controller.queryField.text) {
+        val q = controller.prepareSubmit(explicitQuery) ?: return
+        savedQuery = q
+        focusManager.clearFocus()
         keyboard?.hide()
         scope.launch {
-            state = BrowseSearchState.Loading
-            state = try {
-                BrowseSearchState.Results(source.search(q))
-            } catch (e: Exception) {
-                BrowseSearchState.Error(e.message ?: "Erreur inconnue")
+            val updatedRecents = withContext(Dispatchers.IO) {
+                SearchHistory.record(context, q)
+            }
+            controller.recentSearches = updatedRecents
+            val result = withContext(Dispatchers.IO) {
+                runCatching { source.search(q) }
+            }
+            result.fold(
+                onSuccess = { controller.finishSubmitSuccess(it) },
+                onFailure = { controller.finishSubmitError(it.message ?: "Erreur inconnue") },
+            )
+        }
+    }
+
+    fun openFromSuggestion(anime: AnimeSearchResult) {
+        val recordText = anime.title.ifBlank { controller.trimmedQuery }
+        focusManager.clearFocus()
+        keyboard?.hide()
+        if (recordText.isNotBlank()) {
+            scope.launch {
+                val updatedRecents = withContext(Dispatchers.IO) {
+                    SearchHistory.record(context, recordText)
+                }
+                controller.recentSearches = updatedRecents
             }
         }
+        onOpenShow(anime)
     }
 
     Column(
@@ -153,42 +226,69 @@ fun BrowseScreen(
             contentAlignment = Alignment.Center,
         ) {
             OutlinedTextField(
-                value = query,
-                onValueChange = {
-                    query = it
-                    if (it.isBlank()) state = BrowseSearchState.Idle
+                value = controller.queryField,
+                onValueChange = { next ->
+                    controller.onQueryChange(next)
+                    savedQuery = next.text
                 },
                 modifier = Modifier
                     .fillMaxWidth()
                     .widthIn(max = 720.dp)
+                    .focusRequester(focusRequester)
+                    .onFocusChanged { focusState ->
+                        controller.onFocusChanged(focusState.isFocused)
+                        if (focusState.isFocused) {
+                            scope.launch {
+                                val (recents, lib, hist) = withContext(Dispatchers.IO) {
+                                    Triple(
+                                        SearchHistory.recent(context),
+                                        Library.all(context),
+                                        WatchHistory.recent(context),
+                                    )
+                                }
+                                controller.updateLocalSources(recents, lib, hist)
+                            }
+                        }
+                    }
                     .testTag("browse_search_input"),
                 placeholder = { Text(text = "Rechercher un anime (ex. Frieren, Naruto)…") },
                 leadingIcon = {
                     IconButton(
-                        onClick = { runSearch() },
+                        onClick = { submitSearch() },
                         modifier = Modifier.minimumInteractiveComponentSize(),
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.Search,
+                            imageVector = NovayIcons.Search,
                             contentDescription = "Lancer la recherche",
                             tint = MaterialTheme.colorScheme.primary,
                         )
                     }
                 },
                 trailingIcon = {
-                    if (query.isNotEmpty()) {
+                    if (controller.queryField.text.isNotEmpty() || controller.isFocused) {
                         IconButton(
                             onClick = {
-                                query = ""
-                                state = BrowseSearchState.Idle
+                                if (controller.queryField.text.isNotEmpty()) {
+                                    savedQuery = ""
+                                    controller.clearQueryOnly()
+                                } else {
+                                    savedQuery = ""
+                                    focusManager.clearFocus()
+                                    keyboard?.hide()
+                                    controller.resetToSpotlight()
+                                }
                             },
                             modifier = Modifier
                                 .minimumInteractiveComponentSize()
                                 .testTag("browse_clear_button"),
                         ) {
                             Icon(
-                                imageVector = Icons.Rounded.Close,
-                                contentDescription = "Effacer la recherche",
+                                imageVector = NovayIcons.Close,
+                                contentDescription = if (controller.queryField.text.isNotEmpty()) {
+                                    "Effacer la recherche"
+                                } else {
+                                    "Fermer les suggestions"
+                                },
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
@@ -197,7 +297,7 @@ fun BrowseScreen(
                 singleLine = true,
                 shape = MaterialTheme.shapes.extraLarge,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { runSearch() }),
+                keyboardActions = KeyboardActions(onSearch = { submitSearch() }),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
@@ -211,66 +311,102 @@ fun BrowseScreen(
         }
 
         AnimatedContent(
-            targetState = state,
+            targetState = displayMode,
             transitionSpec = { motion.stateCrossfade() },
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
             label = "browse_search_state",
-        ) { s ->
-            when (s) {
-                BrowseSearchState.Idle -> IdleBrowseSpotlight(
-                    featured = featured,
+        ) { display ->
+            when (display) {
+                BrowseSearchDisplay.SpotlightIdle -> IdleBrowseSpotlight(
+                    featured = controller.featuredState,
                     bottomChrome = bottomChrome,
                     onOpenShow = onOpenShow,
-                    onQuickQuery = { chip -> runSearch(chip) },
+                    onQuickQuery = { chip -> submitSearch(chip) },
                 )
-                BrowseSearchState.Loading -> PosterGridSkeleton(
+
+                BrowseSearchDisplay.FocusedEmptySuggestions,
+                BrowseSearchDisplay.TypingSuggestions -> BrowseSuggestionsContent(
+                    isTyping = display == BrowseSearchDisplay.TypingSuggestions,
+                    query = controller.queryField.text,
+                    suggestions = controller.suggestions,
+                    bottomChrome = bottomChrome,
+                    onSelectQuery = { selectedQuery -> submitSearch(selectedQuery) },
+                    onFillQuery = { filled ->
+                        savedQuery = filled
+                        controller.fillQuery(filled)
+                        focusRequester.requestFocus()
+                    },
+                    onRemoveRecent = { recentQuery ->
+                        scope.launch {
+                            controller.recentSearches = withContext(Dispatchers.IO) {
+                                SearchHistory.remove(context, recentQuery)
+                            }
+                        }
+                    },
+                    onClearHistory = {
+                        scope.launch {
+                            controller.recentSearches = withContext(Dispatchers.IO) {
+                                SearchHistory.clear(context)
+                            }
+                        }
+                    },
+                    onOpenShow = ::openFromSuggestion,
+                )
+
+                BrowseSearchDisplay.LoadingResults -> PosterGridSkeleton(
                     minCellSize = 140.dp,
                     itemCount = 9,
                     modifier = Modifier.padding(bottom = bottomChrome),
                 )
-                is BrowseSearchState.Error -> ErrorView(
-                    message = s.message,
-                    onRetry = { runSearch() },
+
+                BrowseSearchDisplay.Error -> {
+                    val errMessage = (controller.submittedState as? BrowseSearchState.Error)
+                        ?.message ?: "Erreur inconnue"
+                    ErrorView(
+                        message = errMessage,
+                        onRetry = { submitSearch() },
+                        modifier = Modifier.padding(bottom = bottomChrome),
+                    )
+                }
+
+                BrowseSearchDisplay.EmptyResults -> EmptyScreen(
+                    icon = NovayIcons.Search,
+                    headingText = "Aucun résultat",
+                    subtitleText = "Rien trouvé pour « ${controller.trimmedQuery} » — vérifie l'orthographe ou essaie un mot-clé plus court.",
                     modifier = Modifier.padding(bottom = bottomChrome),
                 )
-                is BrowseSearchState.Results -> {
-                    if (s.results.isEmpty()) {
-                        EmptyScreen(
-                            icon = Icons.Rounded.Search,
-                            headingText = "Aucun résultat",
-                            subtitleText = "Rien trouvé pour « ${query.trim()} » — vérifie l'orthographe ou essaie un mot-clé plus court.",
-                            modifier = Modifier.padding(bottom = bottomChrome),
-                        )
-                    } else {
-                        LazyVerticalGrid(
-                            columns = GridCells.Adaptive(140.dp),
-                            contentPadding = PaddingValues(
-                                start = 16.dp,
-                                end = 16.dp,
-                                top = 12.dp,
-                                bottom = 24.dp + bottomChrome,
-                            ),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp),
-                            modifier = Modifier.fillMaxSize(),
-                        ) {
-                            items(
-                                items = s.results,
-                                key = { it.url },
-                                contentType = { "search_result" },
-                            ) { result ->
-                                val itemMod = if (motion.reduceMotion) Modifier else Modifier.animateItem()
-                                AnimeComfortableGridItem(
-                                    title = result.title,
-                                    posterUrl = result.posterUrl,
-                                    modifier = itemMod,
-                                    animeUrl = result.url,
-                                    onClick = { onOpenShow(result) },
-                                    onLongClick = { },
-                                )
-                            }
+
+                BrowseSearchDisplay.Results -> {
+                    val results = (controller.submittedState as? BrowseSearchState.Results)
+                        ?.results.orEmpty()
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(140.dp),
+                        contentPadding = PaddingValues(
+                            start = 16.dp,
+                            end = 16.dp,
+                            top = 12.dp,
+                            bottom = 24.dp + bottomChrome,
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(
+                            items = results,
+                            key = { it.url },
+                            contentType = { "search_result" },
+                        ) { result ->
+                            val itemMod = if (motion.reduceMotion) Modifier else Modifier.animateItem()
+                            AnimeComfortableGridItem(
+                                title = result.title,
+                                posterUrl = result.posterUrl,
+                                modifier = itemMod,
+                                animeUrl = result.url,
+                                onClick = { onOpenShow(result) },
+                                onLongClick = { },
+                            )
                         }
                     }
                 }
@@ -311,7 +447,7 @@ private fun IdleBrowseSpotlight(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(DISCOVERY_CHIPS, key = { it }) { chip ->
+                items(BROWSE_DISCOVERY_CHIPS, key = { it }) { chip ->
                     FilterChip(
                         selected = false,
                         onClick = { onQuickQuery(chip) },
@@ -359,15 +495,17 @@ private fun IdleBrowseSpotlight(
                     }
                 }
             }
+
             BrowseFeaturedState.Unavailable -> {
                 item(key = "idle_empty", contentType = "empty") {
                     EmptyScreen(
-                        icon = Icons.Rounded.Search,
+                        icon = NovayIcons.Search,
                         headingText = "Explore le catalogue",
                         subtitleText = "Saisis au moins 2 lettres ou choisis un thème ci-dessus — la recherche gère automatiquement les variantes.",
                     )
                 }
             }
+
             is BrowseFeaturedState.Loaded -> {
                 val lead = featured.items.first()
                 val rest = featured.items.drop(1)
@@ -493,7 +631,7 @@ private fun SpotlightHeroCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.AutoAwesome,
+                        imageVector = NovayIcons.Spotlight,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(16.dp),
@@ -529,7 +667,7 @@ private fun SpotlightHeroCard(
                     modifier = Modifier.minimumInteractiveComponentSize(),
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.PlayArrow,
+                        imageVector = NovayIcons.Play,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
                     )

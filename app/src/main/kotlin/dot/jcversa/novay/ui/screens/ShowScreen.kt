@@ -37,12 +37,6 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.rounded.DoneAll
-import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.MovieFilter
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -103,6 +97,7 @@ import dot.jcversa.novay.ui.components.LocalSlateMotion
 import dot.jcversa.novay.ui.components.NovayAppBar
 import dot.jcversa.novay.ui.components.NovayBadge
 import dot.jcversa.novay.ui.components.NovayFavoriteMorphIcon
+import dot.jcversa.novay.ui.components.NovayIcons
 import dot.jcversa.novay.ui.components.PosterImage
 import dot.jcversa.novay.ui.components.ShowScreenSkeleton
 import dot.jcversa.novay.ui.components.SlateMotion
@@ -235,7 +230,7 @@ fun ShowScreen(
                     if (!seasons.isNullOrEmpty()) {
                         AppBarAction(
                             contentDescription = "Actions rapides",
-                            icon = Icons.Rounded.MoreVert,
+                            icon = NovayIcons.Overflow,
                             modifier = Modifier.testTag("show_actions_sheet_button"),
                             onClick = { showActionsSheet = true },
                         )
@@ -271,7 +266,7 @@ fun ShowScreen(
                         ShowScreenSkeleton()
                     }
                     "empty" -> EmptyScreen(
-                        icon = Icons.Rounded.MovieFilter,
+                        icon = NovayIcons.SeasonReel,
                         headingText = "Aucune saison disponible",
                         subtitleText = "Aucune saison n'est listée pour cet animé pour le moment.",
                         modifier = Modifier.padding(bottom = bottomChrome),
@@ -395,7 +390,7 @@ fun ShowScreen(
                 shape = CircleShape,
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.PlayArrow,
+                    imageVector = NovayIcons.Play,
                     contentDescription = null,
                 )
                 Spacer(Modifier.width(6.dp))
@@ -432,7 +427,7 @@ fun ShowScreen(
                 )
                 ShowSheetActionRow(
                     label = if (inLibrary) "Retirer de la bibliothèque" else "Ajouter à la bibliothèque",
-                    icon = Icons.Rounded.PlayArrow,
+                    icon = NovayIcons.Play,
                     customLeading = {
                         NovayFavoriteMorphIcon(
                             inLibrary = inLibrary,
@@ -451,7 +446,7 @@ fun ShowScreen(
                         } else {
                             "Ouvrir ${first.name}"
                         },
-                        icon = Icons.Rounded.PlayArrow,
+                        icon = NovayIcons.Play,
                         onClick = {
                             showActionsSheet = false
                             if (resumeEntry != null) {
@@ -465,7 +460,7 @@ fun ShowScreen(
                 if (seasons.orEmpty().isNotEmpty()) {
                     ShowSheetActionRow(
                         label = "Marquer les saisons comme vues",
-                        icon = Icons.Rounded.DoneAll,
+                        icon = NovayIcons.MarkAllSeen,
                         onClick = {
                             showActionsSheet = false
                             seasons.orEmpty().forEach(markSeasonSeen)
@@ -563,7 +558,7 @@ private fun LazyListScope.showOverviewAndSeasons(
                     .testTag("show_primary_cta"),
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.PlayArrow,
+                    imageVector = NovayIcons.Play,
                     contentDescription = null,
                     modifier = Modifier.size(20.dp),
                 )
@@ -835,7 +830,7 @@ private fun SeasonRow(
                 }
             }
             Icon(
-                imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                imageVector = NovayIcons.ChevronRight,
                 contentDescription = "Voir les épisodes de ${season.name}",
                 tint = if (isActive) {
                     MaterialTheme.colorScheme.primary

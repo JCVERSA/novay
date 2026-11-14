@@ -75,7 +75,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected as semanticsSelected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.rememberHazeState
@@ -90,6 +89,7 @@ import dot.jcversa.novay.ui.components.LocalAnimatedVisibilityScope
 import dot.jcversa.novay.ui.components.LocalNovayHazeState
 import dot.jcversa.novay.ui.components.LocalSharedTransitionScope
 import dot.jcversa.novay.ui.components.LocalSlateMotion
+import dot.jcversa.novay.ui.components.NovayBrandSeal
 import dot.jcversa.novay.ui.components.NovayTabMorphIcon
 import dot.jcversa.novay.ui.components.PredictiveBackContainer
 import dot.jcversa.novay.ui.components.SlateMotion
@@ -305,12 +305,11 @@ fun NoVaYApp() {
                                         .fillMaxHeight()
                                         .windowInsetsPadding(WindowInsets.safeDrawing),
                                     header = {
-                                        Text(
-                                            text = "NV",
-                                            style = MaterialTheme.typography.titleLarge,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(vertical = 14.dp),
+                                        NovayBrandSeal(
+                                            size = 40.dp,
+                                            modifier = Modifier
+                                                .padding(vertical = 10.dp)
+                                                .testTag("nav_rail_brand_logo"),
                                         )
                                     },
                                 ) {

@@ -14,11 +14,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.rounded.DarkMode
-import androidx.compose.material.icons.rounded.Download
-import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -50,6 +45,8 @@ import dot.jcversa.novay.downloads.Downloads
 import dot.jcversa.novay.ui.LocalBottomChromePadding
 import dot.jcversa.novay.ui.components.AppBarTitle
 import dot.jcversa.novay.ui.components.NovayAppBar
+import dot.jcversa.novay.ui.components.NovayBrandEditorialHeader
+import dot.jcversa.novay.ui.components.NovayIcons
 import dot.jcversa.novay.ui.theme.NovayThemeState
 import dot.jcversa.novay.ui.theme.header
 import kotlinx.coroutines.Dispatchers
@@ -123,7 +120,7 @@ fun MoreScreen(
                             totalCount > 0 -> "$totalCount en attente"
                             else -> "Aucun téléchargement actif"
                         },
-                        icon = Icons.Rounded.Download,
+                        icon = NovayIcons.Download,
                         modifier = Modifier.testTag("more_open_downloads"),
                         onPreferenceClick = onOpenDownloads,
                     )
@@ -140,7 +137,7 @@ fun MoreScreen(
                         SwitchPreferenceWidget(
                             title = "Noir pur AMOLED",
                             subtitle = "Remplace le Midnight Noir par un noir absolu sur écrans OLED.",
-                            icon = Icons.Rounded.DarkMode,
+                            icon = NovayIcons.AmoledMoon,
                             checked = amoled,
                             testTagName = "more_amoled_switch",
                             onCheckedChanged = { checked ->
@@ -155,7 +152,7 @@ fun MoreScreen(
                         SwitchPreferenceWidget(
                             title = "Wi-Fi uniquement",
                             subtitle = "Met en pause en 4G/5G et reprend automatiquement en Wi-Fi.",
-                            icon = Icons.Rounded.Wifi,
+                            icon = NovayIcons.WifiSignal,
                             checked = wifiOnly,
                             testTagName = "more_wifi_switch",
                             onCheckedChanged = { checked ->
@@ -177,13 +174,9 @@ fun MoreScreen(
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Text(
-                            text = "NoVaY — Cinema Midnight Noir",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
+                        NovayBrandEditorialHeader()
                         AboutText("Streaming anime VF/VOSTFR et lecture hors-ligne avec Media3 ExoPlayer.")
                         AboutText(
                             "Architecture d'interface inspirée de Mihon (github.com/mihonapp/mihon, Apache-2.0)."
@@ -241,7 +234,7 @@ private fun TextPreferenceWidget(
             )
         }
         Icon(
-            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+            imageVector = NovayIcons.ChevronRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )

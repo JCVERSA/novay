@@ -24,12 +24,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.DeleteOutline
-import androidx.compose.material.icons.rounded.DownloadDone
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.PlayCircleOutline
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
@@ -71,6 +65,7 @@ import dot.jcversa.novay.ui.components.AppBarTitle
 import dot.jcversa.novay.ui.components.EmptyScreen
 import dot.jcversa.novay.ui.components.LocalSlateMotion
 import dot.jcversa.novay.ui.components.NovayAppBar
+import dot.jcversa.novay.ui.components.NovayIcons
 import dot.jcversa.novay.ui.components.Pill
 import dot.jcversa.novay.ui.components.SlateMotion
 import dot.jcversa.novay.ui.state.DownloadSection
@@ -205,7 +200,7 @@ fun DownloadsScreen(
             ) { isEmpty ->
                 if (isEmpty) {
                     EmptyScreen(
-                        icon = Icons.Rounded.DownloadDone,
+                        icon = NovayIcons.DownloadDone,
                         headingText = "Aucun téléchargement",
                         subtitleText = "Ouvre une saison et touche l'icône de téléchargement sur un épisode pour choisir sa résolution hors-ligne.",
                         modifier = Modifier.padding(bottom = bottomChrome),
@@ -313,7 +308,7 @@ fun DownloadsScreen(
                 contentColor = MaterialTheme.colorScheme.onPrimary,
             ) {
                 Icon(
-                    imageVector = if (paused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                    imageVector = if (paused) NovayIcons.Play else NovayIcons.Pause,
                     contentDescription = null,
                 )
                 Spacer(Modifier.width(6.dp))
@@ -402,7 +397,7 @@ private fun DownloadRow(
                             .testTag("download_play_button"),
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.PlayCircleOutline,
+                            imageVector = NovayIcons.PlayCircle,
                             contentDescription = "Lire hors-ligne",
                             tint = MaterialTheme.colorScheme.tertiary,
                         )
@@ -415,7 +410,7 @@ private fun DownloadRow(
                         .testTag("download_remove_button"),
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.DeleteOutline,
+                        imageVector = NovayIcons.DeleteTrash,
                         contentDescription = "Supprimer le téléchargement",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -3,8 +3,6 @@ package dot.jcversa.novay.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -40,7 +38,7 @@ fun PosterImage(
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Outlined.Movie,
+                imageVector = NovayIcons.ClapperFilm,
                 contentDescription = contentDescription,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -82,7 +80,7 @@ fun PosterImage(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Outlined.Movie,
+                        imageVector = NovayIcons.ClapperFilm,
                         contentDescription = contentDescription,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )

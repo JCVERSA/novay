@@ -22,8 +22,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
@@ -80,7 +78,7 @@ fun ContinueReadingButton(
             ),
         ) {
             Icon(
-                imageVector = Icons.Rounded.PlayArrow,
+                imageVector = NovayIcons.Play,
                 contentDescription = "Reprendre la lecture",
                 modifier = Modifier.size(iconSize),
             )
