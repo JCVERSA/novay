@@ -6,19 +6,26 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import coil.compose.SubcomposeAsyncImage
-import androidx.compose.material3.MaterialTheme
+import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
+import coil.request.ImageRequest
 
 /**
- * Affiche d'un anime : l'image réelle du catalogue si elle existe, sinon
- * le placeholder film (fond sombre + icône). Pendant le chargement : un
- * petit spinner SwiftSlate.
+ * Affiche d'un anime : utilise [AsyncImage] (sans sous-composition coûteuse
+ * en LazyGrid/LazyColumn) avec downsampling Coil automatique, fondu GPU et
+ * squelette Shimmer sans allocation pendant le chargement.
  */
 @Composable
 fun PosterImage(
@@ -38,19 +45,36 @@ fun PosterImage(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-    } else {
-        SubcomposeAsyncImage(
-            model = url,
+        return
+    }
+
+    val context = LocalContext.current
+    val request = remember(context, url) {
+        ImageRequest.Builder(context)
+            .data(url)
+            .crossfade(160)
+            .build()
+    }
+    var state by remember(url) {
+        mutableStateOf<AsyncImagePainter.State>(AsyncImagePainter.State.Loading(null))
+    }
+
+    Box(modifier = modifier) {
+        AsyncImage(
+            model = request,
             contentDescription = contentDescription,
             contentScale = ContentScale.Crop,
-            modifier = modifier,
-            loading = {
+            onState = { state = it },
+            modifier = Modifier.fillMaxSize(),
+        )
+        when (state) {
+            is AsyncImagePainter.State.Loading -> {
                 ShimmerBox(
                     modifier = Modifier.fillMaxSize(),
                     shape = MaterialTheme.shapes.extraSmall,
                 )
-            },
-            error = {
+            }
+            is AsyncImagePainter.State.Error -> {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -64,6 +88,7 @@ fun PosterImage(
                     )
                 }
             }
-        )
+            else -> Unit
+        }
     }
 }

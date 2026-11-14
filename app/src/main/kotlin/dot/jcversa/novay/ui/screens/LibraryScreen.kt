@@ -143,11 +143,22 @@ fun LibraryScreen(
             val history = WatchHistory.recent(context)
             val libUrls = lib.map { it.url.trimEnd('/') }.toSet()
             val latest = history.firstOrNull { it.animeUrl.trimEnd('/') in libUrls } ?: history.firstOrNull()
+            val completedByTitle = downloads.asSequence()
+                .filter { it.isCompleted }
+                .mapNotNull { it.meta?.animeTitle }
+                .groupingBy { it }
+                .eachCount()
+            val resumeByUrl = buildMap(history.size) {
+                for (h in history) {
+                    putIfAbsent(h.animeUrl.trimEnd('/'), h)
+                }
+            }
             val items = lib.map { entry ->
+                val normalized = entry.url.trimEnd('/')
                 LibraryItemUi(
                     entry = entry,
-                    downloadedCount = downloads.count { it.meta?.animeTitle == entry.title && it.isCompleted },
-                    resume = history.firstOrNull { it.animeUrl.trimEnd('/') == entry.url.trimEnd('/') },
+                    downloadedCount = completedByTitle[entry.title] ?: 0,
+                    resume = resumeByUrl[normalized],
                 )
             }
             LibraryUiState(
@@ -302,7 +313,6 @@ fun LibraryScreen(
                     else -> {
                         val grid = display != LibraryDisplay.LIST
                         val cellSize = if (display == LibraryDisplay.COMPACT_GRID) 104.dp else 140.dp
-                        val itemAnimMod = if (motion.reduceMotion) Modifier else Modifier
                         val selectionBarClearance = if (selectionMode) 68.dp else 0.dp
                         if (grid) {
                             LazyVerticalGrid(
@@ -334,7 +344,7 @@ fun LibraryScreen(
                                     key = { it.entry.url },
                                     contentType = { display.name },
                                 ) { holder ->
-                                    val placedMod = if (motion.reduceMotion) itemAnimMod else Modifier.animateItem()
+                                    val placedMod = if (motion.reduceMotion) Modifier else Modifier.animateItem()
                                     if (display == LibraryDisplay.COMPACT_GRID) {
                                         AnimeCompactGridItem(
                                             title = holder.entry.title,

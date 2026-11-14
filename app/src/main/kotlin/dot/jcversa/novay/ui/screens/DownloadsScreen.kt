@@ -76,7 +76,6 @@ import dot.jcversa.novay.ui.components.SlateMotion
 import dot.jcversa.novay.ui.state.DownloadSection
 import dot.jcversa.novay.ui.theme.header
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -101,28 +100,15 @@ fun DownloadsScreen(
     var paused by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            wifiOnly = Downloads.isWifiOnly(context)
-            runCatching { paused = Downloads.manager(context).downloadsPaused }
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        while (true) {
-            var snapshot = emptyList<Downloads.DownloadInfo>()
-            var isPaused = false
-            withContext(Dispatchers.IO) {
-                snapshot = runCatching { Downloads.snapshot(context) }.getOrDefault(emptyList())
-                runCatching { isPaused = Downloads.manager(context).downloadsPaused }
-            }
-            infos = snapshot
-            paused = isPaused
-            speeds = infos.filter { it.isActive }.associate { info ->
+    LaunchedEffect(context) {
+        wifiOnly = withContext(Dispatchers.IO) { Downloads.isWifiOnly(context) }
+        Downloads.observeQueue(context).collect { queue ->
+            infos = queue.items
+            paused = queue.paused
+            speeds = queue.items.filter { it.isActive }.associate { info ->
                 val meter = meters.getOrPut(info.id) { SpeedMeter() }
                 info.id to meter.sample(info.bytesDownloaded, info.totalBytes)
             }
-            delay(1000)
         }
     }
 

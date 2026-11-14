@@ -289,7 +289,7 @@ private fun IdleBrowseSpotlight(
 ) {
     val motion = LocalSlateMotion.current
     val listState = rememberLazyListState()
-    val heroParallaxOffset by remember {
+    val heroParallaxOffsetState = remember(listState, motion.reduceMotion) {
         derivedStateOf {
             if (motion.reduceMotion || listState.firstVisibleItemIndex > 1) {
                 0f
@@ -298,6 +298,7 @@ private fun IdleBrowseSpotlight(
             }
         }
     }
+    val parallaxProvider = remember(heroParallaxOffsetState) { { heroParallaxOffsetState.value } }
 
     LazyColumn(
         state = listState,
@@ -379,7 +380,7 @@ private fun IdleBrowseSpotlight(
                     ) {
                         SpotlightHeroCard(
                             anime = lead,
-                            parallaxOffsetPx = heroParallaxOffset,
+                            parallaxOffsetProvider = parallaxProvider,
                             modifier = Modifier.widthIn(max = 840.dp),
                             onClick = { onOpenShow(lead) },
                         )
@@ -428,7 +429,7 @@ private fun IdleBrowseSpotlight(
 @Composable
 private fun SpotlightHeroCard(
     anime: AnimeSearchResult,
-    parallaxOffsetPx: Float,
+    parallaxOffsetProvider: () -> Float,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -452,7 +453,7 @@ private fun SpotlightHeroCard(
                 .graphicsLayer {
                     scaleX = 1.08f
                     scaleY = 1.08f
-                    translationY = parallaxOffsetPx
+                    translationY = parallaxOffsetProvider()
                 }
                 .blur(18.dp)
                 .alpha(0.32f),

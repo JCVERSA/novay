@@ -532,7 +532,7 @@ private fun AniyomiIconOnlyDock(
     val motion = LocalSlateMotion.current
     val destinations = TopLevelDestination.entries
     val selectedIndex = destinations.indexOf(current).coerceAtLeast(0)
-    val animatedIndex by animateFloatAsState(
+    val animatedIndexState = animateFloatAsState(
         targetValue = selectedIndex.toFloat(),
         animationSpec = motion.dockIndicatorSpec(),
         label = "dock_pill_index",
@@ -555,13 +555,13 @@ private fun AniyomiIconOnlyDock(
             val count = destinations.size
             val slotWidthPx = with(density) { (maxWidth / count).toPx() }
             val pillWidthPx = with(density) { pillWidth.toPx() }
-            val indicatorOffsetX = (slotWidthPx * animatedIndex) + ((slotWidthPx - pillWidthPx) / 2f)
 
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterStart)
                     .graphicsLayer {
-                        translationX = indicatorOffsetX
+                        translationX = (slotWidthPx * animatedIndexState.value) +
+                            ((slotWidthPx - pillWidthPx) / 2f)
                     }
                     .size(width = pillWidth, height = pillHeight)
                     .clip(CircleShape)

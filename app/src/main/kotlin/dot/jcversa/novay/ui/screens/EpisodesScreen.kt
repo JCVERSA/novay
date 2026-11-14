@@ -125,21 +125,8 @@ fun EpisodesScreen(
     onBack: () -> Unit,
     onOpenPlayer: (episode: AnimeEpisode, offlineStream: ResolvedStream?) -> Unit
 ) {
-    val context = LocalContext.current
     var seasonTotal by remember(season.url) { mutableStateOf<Int?>(null) }
     var doneCount by remember(season.url) { mutableIntStateOf(0) }
-
-    LaunchedEffect(season.url) {
-        val seasonUrl = season.url.trimEnd('/')
-        while (true) {
-            doneCount = withContext(Dispatchers.IO) {
-                runCatching { Downloads.snapshot(context) }
-                    .getOrDefault(emptyList())
-                    .count { it.meta?.seasonUrl?.trimEnd('/') == seasonUrl && it.isCompleted }
-            }
-            delay(1500)
-        }
-    }
 
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
 
@@ -169,6 +156,7 @@ fun EpisodesScreen(
             season = season,
             onOpenPlayer = onOpenPlayer,
             onLoadedCount = { seasonTotal = it },
+            onDoneCountChange = { doneCount = it },
             showSeasonHeader = false,
             modifier = Modifier
                 .weight(1f)
@@ -191,6 +179,7 @@ fun EpisodesPane(
     modifier: Modifier = Modifier,
     showSeasonHeader: Boolean = false,
     onLoadedCount: (Int) -> Unit = {},
+    onDoneCountChange: (Int) -> Unit = {},
 ) {
     val context = LocalContext.current
     val bottomChrome = LocalBottomChromePadding.current
@@ -241,13 +230,8 @@ fun EpisodesPane(
         }
     }
 
-    LaunchedEffect(season.url) {
-        while (true) {
-            infos = withContext(Dispatchers.IO) {
-                runCatching { Downloads.snapshot(context) }.getOrDefault(emptyList())
-            }
-            delay(1000)
-        }
+    LaunchedEffect(context) {
+        Downloads.observeSnapshots(context).collect { infos = it }
     }
 
     val motion = LocalSlateMotion.current
@@ -346,6 +330,7 @@ fun EpisodesPane(
     }
 
     val done = remember(seasonInfos) { seasonInfos.count { it.isCompleted } }
+    LaunchedEffect(done) { onDoneCountChange(done) }
 
     Column(modifier = modifier) {
         if (showSeasonHeader) {

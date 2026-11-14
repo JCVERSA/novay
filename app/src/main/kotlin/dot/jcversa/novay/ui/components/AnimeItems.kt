@@ -107,7 +107,7 @@ fun AnimeComfortableGridItem(
     val pressed by interactionSource.collectIsPressedAsState()
     val hovered by interactionSource.collectIsHoveredAsState()
     val motion = LocalSlateMotion.current
-    val scale by animateFloatAsState(
+    val scaleState = animateFloatAsState(
         targetValue = when {
             motion.reduceMotion -> 1f
             pressed -> 0.965f
@@ -121,6 +121,7 @@ fun AnimeComfortableGridItem(
     Column(
         modifier = modifier
             .graphicsLayer {
+                val scale = scaleState.value
                 scaleX = scale
                 scaleY = scale
             }
@@ -205,7 +206,7 @@ fun AnimeCompactGridItem(
     val pressed by interactionSource.collectIsPressedAsState()
     val hovered by interactionSource.collectIsHoveredAsState()
     val motion = LocalSlateMotion.current
-    val scale by animateFloatAsState(
+    val scaleState = animateFloatAsState(
         targetValue = when {
             motion.reduceMotion -> 1f
             pressed -> 0.965f
@@ -221,6 +222,7 @@ fun AnimeCompactGridItem(
             .fillMaxWidth()
             .aspectRatio(2f / 3f)
             .graphicsLayer {
+                val scale = scaleState.value
                 scaleX = scale
                 scaleY = scale
             }
@@ -323,7 +325,7 @@ fun AnimeListItem(
         animationSpec = motion.colorSpec(180),
         label = "list_item_bg",
     )
-    val scale by animateFloatAsState(
+    val scaleState = animateFloatAsState(
         targetValue = if (pressed && !motion.reduceMotion) 0.985f else 1f,
         animationSpec = motion.effectFloatSpec(),
         label = "list_item_scale",
@@ -337,6 +339,7 @@ fun AnimeListItem(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
             .graphicsLayer {
+                val scale = scaleState.value
                 scaleX = scale
                 scaleY = scale
             }

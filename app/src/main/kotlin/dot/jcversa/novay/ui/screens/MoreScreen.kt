@@ -53,7 +53,6 @@ import dot.jcversa.novay.ui.components.NovayAppBar
 import dot.jcversa.novay.ui.theme.NovayThemeState
 import dot.jcversa.novay.ui.theme.header
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -76,21 +75,12 @@ fun MoreScreen(
     var totalCount by remember { mutableIntStateOf(0) }
     var paused by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        while (true) {
-            var infos = emptyList<Downloads.DownloadInfo>()
-            var isPaused = false
-            var isWifi = false
-            withContext(Dispatchers.IO) {
-                infos = runCatching { Downloads.snapshot(context) }.getOrDefault(emptyList())
-                runCatching { isPaused = Downloads.manager(context).downloadsPaused }
-                isWifi = Downloads.isWifiOnly(context)
-            }
-            activeCount = infos.count { it.isActive }
-            totalCount = infos.count { !it.isCompleted }
-            paused = isPaused
-            wifiOnly = isWifi
-            delay(2000)
+    LaunchedEffect(context) {
+        wifiOnly = withContext(Dispatchers.IO) { Downloads.isWifiOnly(context) }
+        Downloads.observeQueue(context).collect { queue ->
+            activeCount = queue.items.count { it.isActive }
+            totalCount = queue.items.count { !it.isCompleted }
+            paused = queue.paused
         }
     }
 

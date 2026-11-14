@@ -27,6 +27,15 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import dot.jcversa.novay.data.ResolvedStream
 import dot.jcversa.novay.data.sama.SamaParsers
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.io.IOException
 import java.net.URI
@@ -51,6 +60,11 @@ object Downloads {
     @Volatile private var appContext: Context? = null
     @Volatile private var cacheInternal: androidx.media3.datasource.cache.SimpleCache? = null
     @Volatile private var managerInternal: DownloadManager? = null
+    private val changeEvents = MutableSharedFlow<Unit>(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
 
     /** État d'un téléchargement, exposé à l'UI. */
     data class DownloadInfo(
@@ -68,6 +82,11 @@ object Downloads {
             get() = state == Download.STATE_DOWNLOADING || state == Download.STATE_QUEUED ||
                 state == Download.STATE_RESTARTING
     }
+
+    data class QueueSnapshot(
+        val items: List<DownloadInfo>,
+        val paused: Boolean
+    )
 
     fun init(context: Context) {
         if (appContext != null) return
@@ -129,9 +148,40 @@ object Downloads {
                 dbProvider,
                 cache,
                 RegistryDataSourceFactory()
-            ) { it.run() }.also {
-                it.maxParallelDownloads = 1
-                managerInternal = it
+            ) { it.run() }.also { dm ->
+                dm.maxParallelDownloads = 1
+                dm.addListener(object : DownloadManager.Listener {
+                    override fun onInitialized(downloadManager: DownloadManager) {
+                        changeEvents.tryEmit(Unit)
+                    }
+
+                    override fun onDownloadChanged(
+                        downloadManager: DownloadManager,
+                        download: Download,
+                        finalException: Exception?
+                    ) {
+                        changeEvents.tryEmit(Unit)
+                    }
+
+                    override fun onDownloadRemoved(
+                        downloadManager: DownloadManager,
+                        download: Download
+                    ) {
+                        changeEvents.tryEmit(Unit)
+                    }
+
+                    override fun onIdle(downloadManager: DownloadManager) {
+                        changeEvents.tryEmit(Unit)
+                    }
+
+                    override fun onDownloadsPausedChanged(
+                        downloadManager: DownloadManager,
+                        paused: Boolean
+                    ) {
+                        changeEvents.tryEmit(Unit)
+                    }
+                })
+                managerInternal = dm
             }
         }
         return managerInternal!!
@@ -243,6 +293,32 @@ object Downloads {
         }
         return out
     }
+
+    /**
+     * Flux réactif de la file complète (éléments + état global de pause) :
+     * s'appuie sur [DownloadManager.Listener] au repos (0 requête SQLite)
+     * et rafraîchit toutes les 750 ms uniquement lorsqu'un téléchargement est actif.
+     */
+    fun observeQueue(context: Context): Flow<QueueSnapshot> = flow {
+        val appCtx = context.applicationContext
+        while (true) {
+            val items = snapshot(appCtx)
+            val isPaused = runCatching { manager(appCtx).downloadsPaused }.getOrDefault(false)
+            emit(QueueSnapshot(items = items, paused = isPaused))
+            if (items.any { it.isActive }) {
+                withTimeoutOrNull(750L) { changeEvents.first() }
+            } else {
+                changeEvents.first()
+            }
+        }
+    }.distinctUntilChanged().flowOn(Dispatchers.IO)
+
+    fun observeSnapshots(context: Context): Flow<List<DownloadInfo>> =
+        observeQueue(context).let { queueFlow ->
+            flow {
+                queueFlow.collect { emit(it.items) }
+            }.distinctUntilChanged()
+        }
 
     /** MediaSource de lecture : cache offline d'abord, réseau en repli. */
     fun offlineMediaSource(
