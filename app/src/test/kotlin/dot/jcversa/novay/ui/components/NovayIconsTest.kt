@@ -49,6 +49,10 @@ class NovayIconsTest {
             NovayIcons.DeleteTrash,
             NovayIcons.AmoledMoon,
             NovayIcons.WifiSignal,
+            NovayIcons.FullscreenEnter,
+            NovayIcons.FullscreenExit,
+            NovayIcons.MinimizePlayer,
+            NovayIcons.Subtitles,
         )
 
         icons.forEach { vector ->
@@ -68,9 +72,13 @@ class NovayIconsTest {
         assertTrue(NovayIcons.ViewList.autoMirror)
         assertTrue(NovayIcons.Sort.autoMirror)
         assertTrue(NovayIcons.Volume.autoMirror)
+        assertTrue(NovayIcons.MinimizePlayer.autoMirror)
 
         assertFalse(NovayIcons.Play.autoMirror)
         assertFalse(NovayIcons.Lock.autoMirror)
         assertFalse(NovayIcons.Search.autoMirror)
+        assertFalse(NovayIcons.FullscreenEnter.autoMirror)
+        assertFalse(NovayIcons.FullscreenExit.autoMirror)
+        assertFalse(NovayIcons.Subtitles.autoMirror)
     }
 }

@@ -323,6 +323,57 @@ object NovayIcons {
         }
     }
 
+    /** Coins cinéma vers l'extérieur pour passer en plein écran paysage. */
+    val FullscreenEnter: ImageVector by lazy {
+        buildIcon("FullscreenEnter") {
+            strokePath(width = 1.9f) {
+                moveTo(4f, 9f); lineTo(4f, 4f); lineTo(9f, 4f)
+                moveTo(15f, 4f); lineTo(20f, 4f); lineTo(20f, 9f)
+                moveTo(20f, 15f); lineTo(20f, 20f); lineTo(15f, 20f)
+                moveTo(9f, 20f); lineTo(4f, 20f); lineTo(4f, 15f)
+            }
+        }
+    }
+
+    /** Coins cinéma vers l'intérieur pour quitter le plein écran. */
+    val FullscreenExit: ImageVector by lazy {
+        buildIcon("FullscreenExit") {
+            strokePath(width = 1.9f) {
+                moveTo(9f, 4f); lineTo(9f, 9f); lineTo(4f, 9f)
+                moveTo(15f, 4f); lineTo(15f, 9f); lineTo(20f, 9f)
+                moveTo(20f, 15f); lineTo(15f, 15f); lineTo(15f, 20f)
+                moveTo(4f, 15f); lineTo(9f, 15f); lineTo(9f, 20f)
+            }
+        }
+    }
+
+    /** Cadre avec vignette inférieure pour réduire le lecteur en mini-lecteur flottant. */
+    val MinimizePlayer: ImageVector by lazy {
+        buildIcon("MinimizePlayer", autoMirror = true) {
+            strokePath(width = 1.8f) {
+                moveTo(3.5f, 5.5f); lineTo(20.5f, 5.5f); lineTo(20.5f, 18.5f); lineTo(3.5f, 18.5f); close()
+                moveTo(6.5f, 8.5f); lineTo(11f, 12.2f)
+                moveTo(8.2f, 12.2f); lineTo(11f, 12.2f); lineTo(11f, 9.4f)
+            }
+            fillPath {
+                moveTo(12.8f, 12.8f); lineTo(18.8f, 12.8f); lineTo(18.8f, 16.8f); lineTo(12.8f, 16.8f); close()
+            }
+        }
+    }
+
+    /** Cartouche de sous-titres et pistes audio cinéma. */
+    val Subtitles: ImageVector by lazy {
+        buildIcon("Subtitles") {
+            strokePath(width = 1.85f) {
+                moveTo(3.5f, 5.5f); lineTo(20.5f, 5.5f); lineTo(20.5f, 18.5f); lineTo(3.5f, 18.5f); close()
+                moveTo(7f, 11.2f); lineTo(11.5f, 11.2f)
+                moveTo(13.5f, 11.2f); lineTo(17f, 11.2f)
+                moveTo(7f, 14.8f); lineTo(9.5f, 14.8f)
+                moveTo(11.5f, 14.8f); lineTo(17f, 14.8f)
+            }
+        }
+    }
+
     /** Soleil japonais Hinomaru à 8 rayons nets pour la luminosité. */
     val Brightness: ImageVector by lazy {
         buildIcon("Brightness") {
