@@ -59,8 +59,20 @@ object SamaParsers {
         "<([a-z0-9]+)\\b[^>]*class=[\"'][^\"']*(?:card-title|asn-search-result-title|titre)[^\"']*[\"'][^>]*>([\\s\\S]*?)</\\1>",
         RegexOption.IGNORE_CASE
     )
-    private val IMG_RE = Regex("<img\\b([^>]*)>", RegexOption.IGNORE_CASE)
-    private val IMG_SRC_RE = Regex("(?:src|data-src)\\s*=\\s*[\"']([^\"']+)[\"']", RegexOption.IGNORE_CASE)
+    private val DATA_IMG_ATTR_RE = Regex("data-img\\s*=\\s*[\"']([^\"']*)[\"']", RegexOption.IGNORE_CASE)
+    private val COVER_OEUVRE_RE = Regex(
+        "<(?:img|div|section)\\b[^>]*(?:id\\s*=\\s*[\"']coverOeuvre[\"']|class\\s*=\\s*[\"'][^\"']*(?:coverOeuvre|cover-oeuvre|anime-cover)[^\"']*[\"'])[^>]*>",
+        RegexOption.IGNORE_CASE,
+    )
+    private val META_OG_IMAGE_RE = Regex(
+        "<meta\\b[^>]+(?:property|name)\\s*=\\s*[\"'](?:og:image(?::secure_url)?|twitter:image)[\"'][^>]*>",
+        RegexOption.IGNORE_CASE,
+    )
+    private val CONTENT_ATTR_RE = Regex("content\\s*=\\s*[\"']([^\"']+)[\"']", RegexOption.IGNORE_CASE)
+    private val SLIDE_BG_RE = Regex(
+        "<div\\b[^>]*class\\s*=\\s*[\"'][^\"']*ak-slide-bg[^\"']*[\"'][^>]*>([\\s\\S]*?)</div>",
+        RegexOption.IGNORE_CASE,
+    )
     private val classTextRegexCache = ConcurrentHashMap<String, Regex>()
     private val classTagRegexCache = ConcurrentHashMap<String, Regex>()
     private val attrRegexCache = ConcurrentHashMap<String, Regex>()
@@ -157,16 +169,18 @@ object SamaParsers {
             // repli sur la méta (<p class="asn-search-meta">Anime · 2002</p>).
             val subtitle = classText(anchor.groupValues[2], "asn-search-result-subtitle")
                 .ifEmpty { classText(anchor.groupValues[2], "asn-search-meta") }
-            // Affiche réelle : <img class="asn-search-result-img" src="…">
-            // (data-src en repli — lazy-loading éventuel).
-            val posterPath = classTagAttr(
-                anchor.groupValues[2], "asn-search-result-img", "src", "data-src"
+            // Affiche réelle : <img class="asn-search-result-img" ...>
+            // (data-src / data-lazy-src / data-original / src / srcset via extractBestImageUrl).
+            val rawPoster = classTagAttr(
+                anchor.groupValues[2],
+                "asn-search-result-img",
+                "data-src",
+                "data-lazy-src",
+                "data-original",
+                "src",
             )
-            val posterUrl = if (posterPath.isEmpty()) null else try {
-                URI("$origin/").resolve(posterPath).toString()
-            } catch (_: Exception) {
-                posterPath
-            }
+            val posterUrl = dot.jcversa.novay.data.ImageUrlSanitizer.sanitizePosterUrl(rawPoster, origin)
+                ?: dot.jcversa.novay.data.ImageUrlSanitizer.extractBestImageUrl(anchor.groupValues[2], origin)
             out.add(
                 AnimeSearchResult(
                     title = title,
@@ -207,17 +221,14 @@ object SamaParsers {
             val rawTitle = TITLE_CLASS_RE.find(body)?.groupValues?.get(2)?.let { stripTags(it) }
                 ?: HEADING_RE.find(body)?.groupValues?.get(1)?.let { stripTags(it) }
                 ?: stripTags(body)
-            val title = rawTitle.trim()
+            val title = decodeHtmlEntities(rawTitle.trim())
             if (title.length < 2) continue
 
-            val imgAttrs = IMG_RE.find(body)?.groupValues?.get(1)
-            val posterPath = imgAttrs?.let { ia ->
-                IMG_SRC_RE
-                    .findAll(ia)
-                    .map { it.groupValues[1] }
-                    .firstOrNull { it.isNotBlank() && !it.startsWith("data:") }
-            }.orEmpty()
-            val posterUrl = if (posterPath.isEmpty()) null else resolveUrl(posterPath, "$origin/")
+            val posterUrl = dot.jcversa.novay.data.ImageUrlSanitizer.extractBestImageUrl(body, origin)
+                ?: DATA_IMG_ATTR_RE.find(attrs)?.groupValues?.get(1)?.let {
+                    dot.jcversa.novay.data.ImageUrlSanitizer.sanitizePosterUrl(it, origin)
+                }
+            val cardGenres = extractGenresFromChunk(body)
 
             out.add(
                 AnimeSearchResult(
@@ -225,11 +236,69 @@ object SamaParsers {
                     url = url,
                     slug = afterCat,
                     posterUrl = posterUrl,
+                    genres = cardGenres,
                 )
             )
-            if (out.size >= 24) break
+            if (out.size >= 48) break
         }
         return out
+    }
+
+    /**
+     * Extrait l'URL canonique de l'affiche depuis une page fiche anime
+     * (`/catalogue/<slug>/`) anime-sama (`#coverOeuvre`, `og:image` ou image principale).
+     */
+    fun parseAnimePoster(html: String, origin: String): String? {
+        if (html.isBlank()) return null
+        for (coverMatch in COVER_OEUVRE_RE.findAll(html)) {
+            val resolved = dot.jcversa.novay.data.ImageUrlSanitizer.extractBestImageUrl(coverMatch.value, origin)
+            if (resolved != null) return resolved
+        }
+        for (metaMatch in META_OG_IMAGE_RE.findAll(html)) {
+            val content = CONTENT_ATTR_RE.find(metaMatch.value)?.groupValues?.get(1) ?: continue
+            val resolved = dot.jcversa.novay.data.ImageUrlSanitizer.sanitizePosterUrl(content, origin)
+            if (resolved != null) return resolved
+        }
+        return dot.jcversa.novay.data.ImageUrlSanitizer.extractBestImageUrl(html, origin, skipFlagIcons = true)
+    }
+
+    private val CATALOG_GENRE_SECTION_RE = Regex(
+        "(?:<h[2-4][^>]*>\\s*Genres?\\s*</h[2-4]>|Genres?\\s*:)\\s*([\\s\\S]{0,600}?)(?:</p>|</div>|</section>|<h[2-4])",
+        RegexOption.IGNORE_CASE,
+    )
+    private val CARD_GENRE_P_RE = Regex(
+        "<(?:p|span|div)\\b[^>]*class\\s*=\\s*[\"'][^\"']*genre[^\"']*[\"'][^>]*>([\\s\\S]*?)</(?:p|span|div)>",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private fun extractGenresFromChunk(html: String): List<String> {
+        val raw = mutableListOf<String>()
+        GENRE_TAG_RE.findAll(html).forEach { m ->
+            raw += decodeHtmlEntities(stripTags(m.groupValues[1]))
+        }
+        CARD_GENRE_P_RE.findAll(html).forEach { m ->
+            val txt = decodeHtmlEntities(stripTags(m.groupValues[1]))
+            txt.split(",", "·", "•", "/", "|").forEach { raw += it }
+        }
+        return dot.jcversa.novay.data.GenreCatalog.normalizeList(raw)
+    }
+
+    /**
+     * Extrait la liste normalisée des genres depuis une page fiche anime
+     * (`/catalogue/<slug>/`) anime-sama.
+     */
+    fun parseAnimeGenres(html: String): List<String> {
+        if (html.isEmpty()) return emptyList()
+        val raw = mutableListOf<String>()
+        raw += extractGenresFromChunk(html)
+        CATALOG_GENRE_SECTION_RE.findAll(html).forEach { match ->
+            val section = decodeHtmlEntities(stripTags(match.groupValues[1]))
+            section.split(",", "·", "•", "|").forEach { token ->
+                val cleaned = token.trim()
+                if (cleaned.length in 2..36) raw += cleaned
+            }
+        }
+        return dot.jcversa.novay.data.GenreCatalog.normalizeList(raw)
     }
 
     // ── Variantes de requête (portage 9.18kkk de animeSources.ts) ─────────
@@ -486,7 +555,142 @@ object SamaParsers {
         }.sortedByDescending { it.height }
     }
 
-    fun resolveUrl(url: String, base: String): String = try {
+    // ── Page d'accueil : À la une + derniers épisodes (V3) ───────────────
+    // Structure réelle (sonde CI 14/11, home 590 Ko aplatie) :
+    //  - carrousel héros : <div class="ak-slide"> avec ak-slide-bg (img),
+    //    ak-badge--saison, h2.ak-slide-title, ak-genre-tag (genres),
+    //    p.ak-slide-synopsis, a.ak-slide-cta (lien de saison) ; le DERNIER
+    //    slide est cloné en aria-hidden pour la boucle infinie — ignoré ;
+    //  - cartes : <div class="as-carte as-carte-anime" data-url data-nom
+    //    data-img> + a.as-carte-lien (saison), as-carte-temps (heure).
+
+    /** Entités HTML courantes (titres réels : « &#039;Tis Time… »). */
+    fun decodeHtmlEntities(input: String): String =
+        dot.jcversa.novay.data.ImageUrlSanitizer.decodeHtmlEntities(input)
+
+    /** Libellé de saison déduit d'une URL : « Saison 4 », « Film », « OAV ». */
+    fun seasonLabelFromUrl(url: String): String? {
+        val saison = Regex("/saison([0-9]+)", RegexOption.IGNORE_CASE).find(url)
+        if (saison != null) return "Saison " + saison.groupValues[1]
+        return when {
+            url.contains("/film", ignoreCase = true) -> "Film"
+            url.contains("/oav", ignoreCase = true) -> "OAV"
+            url.contains("/scan", ignoreCase = true) -> "Scans"
+            else -> null
+        }
+    }
+
+    /**
+     * Parse le carrousel « À la une » : chaque ak-slide donne le titre,
+     * le badge de saison, les genres, le synopsis et le lien du CTA.
+     * Les clones aria-hidden (boucle infinie du carrousel) sont ignorés.
+     */
+    fun parseHeroSlides(html: String, origin: String): List<dot.jcversa.novay.data.CatalogHero> {
+        if (html.isEmpty()) return emptyList()
+        val out = mutableListOf<dot.jcversa.novay.data.CatalogHero>()
+        val seen = mutableSetOf<String>()
+        // Découpe sur l'ouverture des slides ; le 1er morceau précède le
+        // carrousel et est ignoré.
+        val chunks = html.split(Regex("<div class=\"ak-slide\""))
+        for (chunk in chunks.drop(1)) {
+            val head = chunk.substringBefore(">")
+            if (head.contains("aria-hidden")) continue
+            // Titre.
+            val title = decodeHtmlEntities(classText(chunk, "ak-slide-title"))
+            if (title.length < 2) continue
+            // Lien du CTA : l'ancre porte ak-slide-cta (href avant OU
+            // après la classe selon le slide).
+            val cta = ANCHOR_FULL_RE.findAll(chunk).firstOrNull { a ->
+                Regex("class\\s*=\\s*[\"'][^\"']*ak-slide-cta").containsMatchIn(a.groupValues[1])
+            }
+            val href = cta?.let { HREF_ATTR_RE.find(it.groupValues[1])?.groupValues?.get(1) } ?: ""
+            if (href.isEmpty() || seen.add(href) == false) continue
+            val url = resolveUrl(href, origin)
+            // Image de fond : conteneur .ak-slide-bg prioritaire, sinon première image non-drapeau du slide.
+            val bgSection = SLIDE_BG_RE.find(chunk)?.groupValues?.get(1) ?: chunk
+            val poster = dot.jcversa.novay.data.ImageUrlSanitizer.extractBestImageUrl(bgSection, origin)
+                ?: dot.jcversa.novay.data.ImageUrlSanitizer.extractBestImageUrl(chunk, origin)
+            out.add(
+                dot.jcversa.novay.data.CatalogHero(
+                    title = title,
+                    seasonLabel = decodeHtmlEntities(classText(chunk, "ak-badge--saison"))
+                        .takeIf { it.isNotEmpty() },
+                    genres = GENRE_TAG_RE.findAll(chunk)
+                        .map { decodeHtmlEntities(it.groupValues[1].trim()) }
+                        .filter { it.isNotEmpty() }
+                        .take(6)
+                        .toList(),
+                    synopsis = decodeHtmlEntities(classText(chunk, "ak-slide-synopsis"))
+                        .takeIf { it.isNotEmpty() },
+                    seasonUrl = url,
+                    posterUrl = poster,
+                    language = samaSubPathLanguage(url)
+                )
+            )
+            if (out.size >= 10) break
+        }
+        return out
+    }
+
+    private val GENRE_TAG_RE = Regex(
+        "<span\\b[^>]*class=\\s*[\"'][^\"']*ak-genre-tag[\"'][^>]*>([\\s\\S]*?)</span>",
+        RegexOption.IGNORE_CASE
+    )
+
+    /**
+     * Parse les cartes d'animés de la page d'accueil : chaque
+     * as-carte-anime porte data-url/data-nom/data-img et un lien vers SA
+     * saison la plus récente. Dédupliqué par animé (une carte par animé :
+     * VF et VOSTFR arrivent en cartes séparées sur le site).
+     */
+    fun parseHomeCards(html: String, origin: String): List<dot.jcversa.novay.data.CatalogCard> {
+        if (html.isEmpty()) return emptyList()
+        val out = mutableListOf<dot.jcversa.novay.data.CatalogCard>()
+        val seen = mutableSetOf<String>()
+        val chunks = html.split(Regex("<div class=\"as-carte "))
+        for (chunk in chunks.drop(1)) {
+            if (!chunk.startsWith("as-carte-anime")) continue
+            val opening = chunk.substringBefore(">")
+            val animeUrl = DATA_URL_ATTR_RE.find(opening)?.groupValues?.get(1) ?: continue
+            if (animeUrl.isEmpty() || !seen.add(animeUrl)) continue
+            val title = decodeHtmlEntities(
+                DATA_NOM_ATTR_RE.find(opening)?.groupValues?.get(1) ?: ""
+            )
+            if (title.length < 2) continue
+            // Lien de saison (as-carte-lien) + miniature (img ou repli data-img) + heure.
+            val lien = ANCHOR_FULL_RE.findAll(chunk).firstOrNull { a ->
+                Regex("class\\s*=\\s*[\"'][^\"']*as-carte-lien").containsMatchIn(a.groupValues[1])
+            }
+            val seasonHref = lien?.let { HREF_ATTR_RE.find(it.groupValues[1])?.groupValues?.get(1) }
+                ?: animeUrl
+            val seasonUrl = resolveUrl(seasonHref, origin)
+            val innerImg = dot.jcversa.novay.data.ImageUrlSanitizer.extractBestImageUrl(chunk, origin)
+            val dataImg = DATA_IMG_ATTR_RE.find(opening)?.groupValues?.get(1)
+                ?.let { dot.jcversa.novay.data.ImageUrlSanitizer.sanitizePosterUrl(it, origin) }
+            val thumb = innerImg ?: dataImg
+            val time = Regex(
+                "<span\\b[^>]*class=\\s*[\"'][^\"']*as-carte-temps[\"'][^>]*>([^<]*)</span>",
+                RegexOption.IGNORE_CASE
+            ).find(chunk)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
+            out.add(
+                dot.jcversa.novay.data.CatalogCard(
+                    title = title,
+                    animeUrl = resolveUrl(animeUrl, origin),
+                    seasonUrl = seasonUrl,
+                    posterUrl = thumb,
+                    timeLabel = time,
+                    language = samaSubPathLanguage(seasonUrl)
+                )
+            )
+            if (out.size >= 60) break
+        }
+        return out
+    }
+
+    private val DATA_URL_ATTR_RE = Regex("data-url\\s*=\\s*[\"']([^\"']*)[\"']", RegexOption.IGNORE_CASE)
+    private val DATA_NOM_ATTR_RE = Regex("data-nom\\s*=\\s*[\"']([^\"']*)[\"']", RegexOption.IGNORE_CASE)
+
+        fun resolveUrl(url: String, base: String): String = try {
         URI(base).resolve(url).toString()
     } catch (_: Exception) {
         url

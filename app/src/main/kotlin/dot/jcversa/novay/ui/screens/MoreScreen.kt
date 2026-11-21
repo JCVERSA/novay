@@ -40,10 +40,15 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import dot.jcversa.novay.ui.theme.NovayTheme
+import dot.jcversa.novay.R
 import dot.jcversa.novay.downloads.Downloads
 import dot.jcversa.novay.ui.LocalBottomChromePadding
 import dot.jcversa.novay.ui.components.AppBarTitle
+import dot.jcversa.novay.ui.components.NovayLottieIcon
 import dot.jcversa.novay.ui.components.NovayAppBar
 import dot.jcversa.novay.ui.components.NovayBrandEditorialHeader
 import dot.jcversa.novay.ui.components.NovayIcons
@@ -67,13 +72,12 @@ fun MoreScreen(
     val bottomChrome = LocalBottomChromePadding.current
     val scope = rememberCoroutineScope()
     var amoled by remember { mutableStateOf(NovayThemeState.amoled) }
-    var wifiOnly by remember { mutableStateOf(false) }
+    var wifiOnly by remember { mutableStateOf(Downloads.isWifiOnly(context)) }
     var activeCount by remember { mutableIntStateOf(0) }
     var totalCount by remember { mutableIntStateOf(0) }
     var paused by remember { mutableStateOf(false) }
 
     LaunchedEffect(context) {
-        wifiOnly = withContext(Dispatchers.IO) { Downloads.isWifiOnly(context) }
         Downloads.observeQueue(context).collect { queue ->
             activeCount = queue.items.count { it.isActive }
             totalCount = queue.items.count { !it.isCompleted }
@@ -121,6 +125,7 @@ fun MoreScreen(
                             else -> "Aucun téléchargement actif"
                         },
                         icon = NovayIcons.Download,
+                        lottieRes = R.raw.lottie_download,
                         modifier = Modifier.testTag("more_open_downloads"),
                         onPreferenceClick = onOpenDownloads,
                     )
@@ -153,6 +158,8 @@ fun MoreScreen(
                             title = "Wi-Fi uniquement",
                             subtitle = "Met en pause en 4G/5G et reprend automatiquement en Wi-Fi.",
                             icon = NovayIcons.WifiSignal,
+                            lottieRes = R.raw.lottie_wifi,
+                            restartKey = wifiOnly,
                             checked = wifiOnly,
                             testTagName = "more_wifi_switch",
                             onCheckedChanged = { checked ->
@@ -208,6 +215,8 @@ private fun TextPreferenceWidget(
     subtitle: String,
     icon: ImageVector,
     modifier: Modifier = Modifier,
+    // V2.7 : icône animée Lottie en lieu et place de l'ImageVector.
+    lottieRes: Int? = null,
     onPreferenceClick: () -> Unit,
 ) {
     Row(
@@ -216,14 +225,23 @@ private fun TextPreferenceWidget(
             .clip(MaterialTheme.shapes.large)
             .clickable(onClick = onPreferenceClick)
             .minimumInteractiveComponentSize()
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-        )
+        if (lottieRes != null) {
+            NovayLottieIcon(
+                res = lottieRes,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                size = 24.dp,
+            )
+        } else {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
         Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(text = title, style = MaterialTheme.typography.bodyLarge)
@@ -248,21 +266,39 @@ private fun SwitchPreferenceWidget(
     icon: ImageVector,
     checked: Boolean,
     testTagName: String,
+    // V2.7 : icône animée Lottie en lieu et place de l'ImageVector.
+    lottieRes: Int? = null,
+    restartKey: Any? = null,
     onCheckedChanged: (Boolean) -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onCheckedChanged(!checked) }
+            .toggleable(
+                value = checked,
+                role = Role.Switch,
+                onValueChange = onCheckedChanged,
+            )
             .minimumInteractiveComponentSize()
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .testTag(testTagName),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-        )
+        if (lottieRes != null) {
+            NovayLottieIcon(
+                res = lottieRes,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                size = 24.dp,
+                restartKey = restartKey,
+            )
+        } else {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
         Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(text = title, style = MaterialTheme.typography.bodyLarge)
@@ -275,11 +311,10 @@ private fun SwitchPreferenceWidget(
         Spacer(Modifier.width(12.dp))
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChanged,
-            modifier = Modifier.testTag(testTagName),
+            onCheckedChange = null,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                checkedThumbColor = NovayTheme.overlays.onCtaContainer,
+                checkedTrackColor = NovayTheme.overlays.ctaContainer,
             ),
         )
     }

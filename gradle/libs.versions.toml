@@ -34,7 +34,7 @@ okhttp = "4.10.0"
 moshiKotlin = "1.15.2"
 moshiKotlinCodegen = "1.15.2"
 datastorePreferences = "1.1.7"
-robolectric = "4.16.1"
+robolectric = "4.18"
 firebaseBom = "34.17.0"
 secretsGradlePlugin = "2.0.1"
 googleServices = "4.5.0"
@@ -43,6 +43,9 @@ googleid = "1.1.1"
 media3 = "1.8.0"
 orgJson = "20240303"
 haze = "1.6.10"
+lottie = "6.7.1"
+libvlc = "3.7.7"
+androidxTestCore = "1.6.1"
 
 
 [libraries]
@@ -103,6 +106,11 @@ media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "medi
 org-json = { group = "org.json", name = "json", version.ref = "orgJson" }
 haze = { group = "dev.chrisbanes.haze", name = "haze", version.ref = "haze" }
 haze-materials = { group = "dev.chrisbanes.haze", name = "haze-materials", version.ref = "haze" }
+lottie-compose = { group = "com.airbnb.android", name = "lottie-compose", version.ref = "lottie" }
+libvlc-all = { group = "org.videolan.android", name = "libvlc-all", version.ref = "libvlc" }
+androidx-test-core = { group = "androidx.test", name = "core", version.ref = "androidxTestCore" }
+compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 
 
 [plugins]

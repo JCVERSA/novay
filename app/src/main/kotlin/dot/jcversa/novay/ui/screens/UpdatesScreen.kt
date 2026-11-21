@@ -45,6 +45,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dot.jcversa.novay.R
 import dot.jcversa.novay.data.AnimeSearchResult
 import dot.jcversa.novay.data.AnimeSource
 import dot.jcversa.novay.data.Library
@@ -186,12 +187,14 @@ fun UpdatesScreen(
                 "loading" -> RowListSkeleton(modifier = Modifier.padding(bottom = bottomChrome))
                 "no_followed" -> EmptyScreen(
                     icon = NovayIcons.UpdatesSeal,
+                    lottieRes = R.raw.lottie_notification,
                     headingText = "Aucun animé suivi",
                     subtitleText = "Ajoute des animés en bibliothèque depuis le catalogue pour recevoir ici les nouveaux épisodes.",
                     modifier = Modifier.padding(bottom = bottomChrome),
                 )
                 "up_to_date" -> EmptyScreen(
                     icon = NovayIcons.UpdatesSeal,
+                    lottieRes = R.raw.lottie_notification,
                     headingText = "Tout est à jour",
                     subtitleText = if (checkError != null) {
                         "Dernière vérification incomplète : $checkError"
@@ -215,8 +218,9 @@ fun UpdatesScreen(
                             key = { it.url },
                             contentType = { "update_row" },
                         ) { entry ->
+                            val rowMod = if (motion.reduceMotion) Modifier else Modifier.animateItem()
                             UpdateRow(
-                                modifier = Modifier.animateItem(),
+                                modifier = rowMod,
                                 entry = entry,
                                 onClick = { onOpenShow(entry.toSearchResult()) },
                             )
@@ -235,10 +239,12 @@ private fun UpdateRow(
     modifier: Modifier = Modifier,
 ) {
     val shape = MaterialTheme.shapes.medium
+    val motion = LocalSlateMotion.current
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
     val containerColor by animateColorAsState(
         targetValue = if (hovered) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+        animationSpec = motion.colorSpec(180),
         label = "update_row_bg",
     )
 
@@ -264,6 +270,8 @@ private fun UpdateRow(
             PosterImage(
                 url = entry.posterUrl,
                 contentDescription = entry.title,
+                animeUrl = entry.url,
+                animeTitle = entry.title,
                 modifier = Modifier
                     .size(width = 58.dp, height = 84.dp)
                     .novaySharedPoster(entry.url)

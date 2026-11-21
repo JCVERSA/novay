@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -50,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dot.jcversa.novay.R
 import dot.jcversa.novay.data.AnimeSearchResult
 import dot.jcversa.novay.ui.components.EmptyScreen
 import dot.jcversa.novay.ui.components.LocalSlateMotion
@@ -91,6 +93,7 @@ internal fun BrowseSuggestionsContent(
             modifier = Modifier
                 .fillMaxSize()
                 .widthIn(max = 760.dp)
+                .imePadding()
                 .testTag("browse_suggestions_list"),
             contentPadding = PaddingValues(
                 start = 16.dp,
@@ -250,6 +253,7 @@ internal fun BrowseSuggestionsContent(
                 item(key = "typing_empty_hint", contentType = "typing_empty") {
                     EmptyScreen(
                         icon = NovayIcons.Search,
+                        lottieRes = R.raw.lottie_explore,
                         headingText = if (query.trim().length < 2) {
                             "Continue à taper…"
                         } else {
@@ -412,7 +416,7 @@ private fun AnimeSuggestionRow(
 
     val badgeColors = when (item.origin) {
         AnimeSuggestionOrigin.LIBRARY ->
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) to MaterialTheme.colorScheme.primary
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) to overlays.crimsonOnContainer
         AnimeSuggestionOrigin.HISTORY ->
             MaterialTheme.colorScheme.secondary.copy(alpha = 0.20f) to MaterialTheme.colorScheme.secondary
         AnimeSuggestionOrigin.FEATURED ->
@@ -436,6 +440,8 @@ private fun AnimeSuggestionRow(
         PosterImage(
             url = item.anime.posterUrl,
             contentDescription = item.anime.title,
+            animeUrl = item.anime.url,
+            animeTitle = item.anime.title,
             modifier = Modifier
                 .size(width = 46.dp, height = 64.dp)
                 .novaySharedPoster(item.anime.url)
@@ -509,6 +515,8 @@ private fun QuickJumpAnimeChipCard(
         PosterImage(
             url = item.anime.posterUrl,
             contentDescription = item.anime.title,
+            animeUrl = item.anime.url,
+            animeTitle = item.anime.title,
             modifier = Modifier
                 .size(width = 40.dp, height = 56.dp)
                 .novaySharedPoster(item.anime.url)

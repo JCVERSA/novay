@@ -47,16 +47,22 @@ import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import dot.jcversa.novay.ui.components.LocalSlateMotion
-import dot.jcversa.novay.ui.components.NovayIcons
+import dot.jcversa.novay.ui.components.NovayLottieIcon
 import dot.jcversa.novay.ui.components.NovayPlayPauseMorphIcon
+import dot.jcversa.novay.R
+import dot.jcversa.novay.ui.components.NovayIcons
 import dot.jcversa.novay.ui.components.SwiftSlateSpinner
 import dot.jcversa.novay.ui.theme.NovayTheme
 import kotlin.math.roundToInt
@@ -156,6 +162,16 @@ fun FloatingMiniPlayer(
         val shape = RoundedCornerShape(14.dp)
         val dur = playerManager.durationMs
         val progress = if (dur > 0L) (playerManager.positionMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f) else 0f
+        val expandLabel = stringResource(R.string.action_expand_player)
+        val closeLabel = stringResource(R.string.action_close_mini_player)
+        val cycleCornerLabel = stringResource(R.string.action_cycle_corner)
+        val sessionTitle = playerManager.session?.let { s ->
+            buildString {
+                if (s.animeTitle.isNotBlank()) append("${s.animeTitle} · ")
+                append(s.episode.label)
+                append(if (playerManager.isPlaying) " · En lecture" else " · En pause")
+            }
+        } ?: ""
 
         Surface(
             shape = shape,
@@ -166,6 +182,24 @@ fun FloatingMiniPlayer(
                 .offset { IntOffset(offsetAnim.value.x.roundToInt(), offsetAnim.value.y.roundToInt()) }
                 .size(width = miniWidthDp, height = miniHeightDp)
                 .border(0.75.dp, overlays.glassBorder, shape)
+                .semantics {
+                    if (sessionTitle.isNotBlank()) stateDescription = sessionTitle
+                    customActions = listOf(
+                        CustomAccessibilityAction(expandLabel) {
+                            onExpandToWatch()
+                            true
+                        },
+                        CustomAccessibilityAction(cycleCornerLabel) {
+                            val corners = MiniPlayerCorner.entries
+                            snappedCorner = corners[(corners.indexOf(snappedCorner) + 1) % corners.size]
+                            true
+                        },
+                        CustomAccessibilityAction(closeLabel) {
+                            playerManager.closeAndStop()
+                            true
+                        },
+                    )
+                }
                 .pointerInput(bounds, miniSizePx) {
                     val touchSlop = viewConfiguration.touchSlop
                     awaitEachGesture {
@@ -242,7 +276,10 @@ fun FloatingMiniPlayer(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .clickable(onClick = onExpandToWatch),
+                        .clickable(
+                            onClickLabel = expandLabel,
+                            onClick = onExpandToWatch,
+                        ),
                 ) {
                     videoSurfaceSlot()
                 }
@@ -277,19 +314,19 @@ fun FloatingMiniPlayer(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     MiniControlButton(
-                        contentDescription = "Agrandir le lecteur",
+                        contentDescription = expandLabel,
                         onClick = onExpandToWatch,
                         testTag = "mini_player_expand_button",
                     ) {
-                        Icon(
-                            imageVector = NovayIcons.FullscreenEnter,
+                        NovayLottieIcon(
+                            res = R.raw.lottie_maximizeminimize,
                             contentDescription = null,
                             tint = overlays.videoControlsInk,
                             modifier = Modifier.size(16.dp),
                         )
                     }
                     MiniControlButton(
-                        contentDescription = "Fermer le mini-lecteur",
+                        contentDescription = closeLabel,
                         onClick = { playerManager.closeAndStop() },
                         testTag = "mini_player_close_button",
                     ) {

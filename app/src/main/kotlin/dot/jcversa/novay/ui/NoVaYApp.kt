@@ -47,8 +47,15 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -87,10 +94,15 @@ import dev.chrisbanes.haze.rememberHazeState
 import dot.jcversa.novay.data.AnimeEpisode
 import dot.jcversa.novay.data.AnimeSearchResult
 import dot.jcversa.novay.data.AnimeSeason
+import dot.jcversa.novay.data.ImageUrlSanitizer
 import dot.jcversa.novay.data.Library
 import dot.jcversa.novay.data.ResolvedStream
+import dot.jcversa.novay.data.WatchHistory
 import dot.jcversa.novay.data.WatchHistoryEntry
 import dot.jcversa.novay.data.sama.SamaSource
+import dot.jcversa.novay.ui.components.LocalPosterResolver
+import dot.jcversa.novay.ui.components.PosterRecoveryCoordinator
+import dot.jcversa.novay.ui.components.PosterResolver
 import dot.jcversa.novay.ui.components.LocalAnimatedVisibilityScope
 import dot.jcversa.novay.ui.components.LocalNovayHazeState
 import dot.jcversa.novay.ui.components.LocalSharedTransitionScope
@@ -281,7 +293,7 @@ private fun rememberNovayAppState(): NovayAppState =
  *  - PredictiveBackHandler en temps réel sur les écrans secondaires ;
  *  - Transitions d'affiches partagées + courbes EaseOutExpo < 300ms.
  */
-@OptIn(ExperimentalSharedTransitionApi::class)
+@OptIn(ExperimentalSharedTransitionApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun NoVaYApp() {
     val source = remember { SamaSource() }
@@ -297,6 +309,7 @@ fun NoVaYApp() {
     val keepScreenOn = playerManager.hasActiveSession && (playerManager.isPlaying || isFullscreen)
 
     PlayerOrientationController(
+        hasActiveSession = playerManager.hasActiveSession,
         isFullscreen = isFullscreen,
         keepScreenOn = keepScreenOn,
     )
@@ -358,9 +371,16 @@ fun NoVaYApp() {
                     0.dp
                 }
 
+                val posterResolver = remember(context, source) {
+                    PosterResolver { target ->
+                        PosterRecoveryCoordinator.resolveAndPersist(context, source, target)
+                    }
+                }
+
                 CompositionLocalProvider(
                     LocalNovayHazeState provides shellHazeState,
                     LocalBottomChromePadding provides bottomChromePadding,
+                    LocalPosterResolver provides posterResolver,
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
                         Row(modifier = Modifier.fillMaxSize()) {
@@ -370,7 +390,11 @@ fun NoVaYApp() {
                                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier
                                         .fillMaxHeight()
-                                        .windowInsetsPadding(WindowInsets.safeDrawing),
+                                        .windowInsetsPadding(
+                                            WindowInsets.safeDrawing.only(
+                                                WindowInsetsSides.Vertical + WindowInsetsSides.Start
+                                            )
+                                        ),
                                     header = {
                                         NovayBrandSeal(
                                             size = 40.dp,
@@ -381,34 +405,43 @@ fun NoVaYApp() {
                                     },
                                 ) {
                                     Spacer(Modifier.weight(0.15f))
+                                    val selectedCrimson = NovayTheme.overlays.crimsonOnContainer
                                     TopLevelDestination.entries.forEach { dest ->
                                         val selected = appState.currentTopLevel == dest
-                                        NavigationRailItem(
-                                            selected = selected,
-                                            onClick = { appState.openTab(dest) },
-                                            alwaysShowLabel = false,
-                                            label = null,
-                                            modifier = Modifier
-                                                .semantics { contentDescription = dest.contentDescription }
-                                                .testTag("nav_rail_${dest.testTagKey}"),
-                                            icon = {
-                                                TabMorphIconWithBadge(
-                                                    dest = dest,
-                                                    selected = selected,
-                                                    updatesBadge = updatesBadge,
-                                                    tint = if (selected) {
-                                                        MaterialTheme.colorScheme.primary
-                                                    } else {
-                                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                                    },
-                                                )
+                                        TooltipBox(
+                                            positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+                                            tooltip = {
+                                                PlainTooltip { Text(dest.contentDescription) }
                                             },
-                                            colors = NavigationRailItemDefaults.colors(
-                                                selectedIconColor = MaterialTheme.colorScheme.primary,
-                                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
-                                            ),
-                                        )
+                                            state = rememberTooltipState(),
+                                        ) {
+                                            NavigationRailItem(
+                                                selected = selected,
+                                                onClick = { appState.openTab(dest) },
+                                                alwaysShowLabel = false,
+                                                label = null,
+                                                modifier = Modifier
+                                                    .semantics { contentDescription = dest.contentDescription }
+                                                    .testTag("nav_rail_${dest.testTagKey}"),
+                                                icon = {
+                                                    TabMorphIconWithBadge(
+                                                        dest = dest,
+                                                        selected = selected,
+                                                        updatesBadge = updatesBadge,
+                                                        tint = if (selected) {
+                                                            selectedCrimson
+                                                        } else {
+                                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                                        },
+                                                    )
+                                                },
+                                                colors = NavigationRailItemDefaults.colors(
+                                                    selectedIconColor = selectedCrimson,
+                                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
+                                                ),
+                                            )
+                                        }
                                     }
                                     Spacer(Modifier.weight(1f))
                                 }
@@ -481,7 +514,16 @@ fun NoVaYApp() {
                                                             )
                                                             Destination.Browse -> BrowseScreen(
                                                                 source = source,
-                                                                onOpenShow = { appState.open(Destination.Show(it)) }
+                                                                onOpenShow = { appState.open(Destination.Show(it)) },
+                                                                onOpenEpisodes = { animeTitle, posterUrl, season ->
+                                                                    appState.open(
+                                                                        Destination.Episodes(
+                                                                            animeTitle = animeTitle,
+                                                                            posterUrl = posterUrl,
+                                                                            season = season
+                                                                        )
+                                                                    )
+                                                                }
                                                             )
                                                             Destination.More -> MoreScreen(
                                                                 onOpenDownloads = { appState.open(Destination.Downloads) }
@@ -490,13 +532,32 @@ fun NoVaYApp() {
                                                                 canBack = canBack,
                                                                 onBack = appState::back,
                                                                 onPlay = { season, episode, stream ->
+                                                                    val derivedAnimeUrl = ImageUrlSanitizer.extractAnimeUrlFromSeasonUrl(season.url)
+                                                                    val normalizedAnime = derivedAnimeUrl?.trimEnd('/')
+                                                                    val knownPoster = normalizedAnime?.let { target ->
+                                                                        Library.all(context)
+                                                                            .firstOrNull { it.url.trimEnd('/') == target }
+                                                                            ?.posterUrl
+                                                                            ?: WatchHistory.recent(context)
+                                                                                .firstOrNull { it.animeUrl.trimEnd('/') == target }
+                                                                                ?.posterUrl
+                                                                    }
+                                                                    val derivedAnime = derivedAnimeUrl?.let { url ->
+                                                                        AnimeSearchResult(
+                                                                            title = episode.label,
+                                                                            url = url,
+                                                                            slug = url.trimEnd('/').substringAfterLast('/', ""),
+                                                                            posterUrl = knownPoster,
+                                                                        )
+                                                                    }
                                                                     appState.open(
                                                                         Destination.Player(
                                                                             season = season,
                                                                             episode = episode,
                                                                             animeTitle = episode.label,
-                                                                            posterUrl = null,
-                                                                            initialStream = stream
+                                                                            posterUrl = knownPoster,
+                                                                            initialStream = stream,
+                                                                            anime = derivedAnime,
                                                                         )
                                                                     )
                                                                 }
@@ -621,6 +682,7 @@ fun NoVaYApp() {
  * Dock bas Aniyomi — uniquement des icônes morphing sans texte, capsule
  * active animée au GPU et badge de mises à jour.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AniyomiIconOnlyDock(
     current: TopLevelDestination,
@@ -629,6 +691,7 @@ private fun AniyomiIconOnlyDock(
     modifier: Modifier = Modifier,
 ) {
     val motion = LocalSlateMotion.current
+    val overlays = NovayTheme.overlays
     val destinations = TopLevelDestination.entries
     val selectedIndex = destinations.indexOf(current).coerceAtLeast(0)
     val animatedIndexState = animateFloatAsState(
@@ -667,7 +730,7 @@ private fun AniyomiIconOnlyDock(
                     .background(MaterialTheme.colorScheme.secondaryContainer)
                     .border(
                         width = 0.5.dp,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.30f),
+                        color = overlays.crimsonOnContainer.copy(alpha = 0.38f),
                         shape = CircleShape,
                     ),
             )
@@ -680,7 +743,7 @@ private fun AniyomiIconOnlyDock(
                     val selected = dest == current
                     val tint by animateColorAsState(
                         targetValue = if (selected) {
-                            MaterialTheme.colorScheme.primary
+                            overlays.crimsonOnContainer
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
@@ -691,27 +754,41 @@ private fun AniyomiIconOnlyDock(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .fillMaxHeight()
-                            .minimumInteractiveComponentSize()
-                            .semantics {
-                                contentDescription = dest.contentDescription
-                                role = Role.Tab
-                                semanticsSelected = selected
-                            }
-                            .clickable(
-                                interactionSource = interactionSource,
-                                indication = ripple(bounded = false, radius = 28.dp),
-                                onClick = { onSelect(dest) },
-                            )
-                            .testTag("nav_bar_${dest.testTagKey}"),
+                            .fillMaxHeight(),
                         contentAlignment = Alignment.Center,
                     ) {
-                        TabMorphIconWithBadge(
-                            dest = dest,
-                            selected = selected,
-                            updatesBadge = updatesBadge,
-                            tint = tint,
-                        )
+                        TooltipBox(
+                            positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+                            tooltip = {
+                                PlainTooltip { Text(dest.contentDescription) }
+                            },
+                            state = rememberTooltipState(),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .minimumInteractiveComponentSize()
+                                    .semantics {
+                                        contentDescription = dest.contentDescription
+                                        role = Role.Tab
+                                        semanticsSelected = selected
+                                    }
+                                    .clickable(
+                                        interactionSource = interactionSource,
+                                        indication = ripple(bounded = false, radius = 28.dp),
+                                        onClick = { onSelect(dest) },
+                                    )
+                                    .testTag("nav_bar_${dest.testTagKey}"),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                TabMorphIconWithBadge(
+                                    dest = dest,
+                                    selected = selected,
+                                    updatesBadge = updatesBadge,
+                                    tint = tint,
+                                )
+                            }
+                        }
                     }
                 }
             }

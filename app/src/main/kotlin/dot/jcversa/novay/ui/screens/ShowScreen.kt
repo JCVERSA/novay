@@ -63,6 +63,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import android.os.Build
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -74,13 +75,16 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dot.jcversa.novay.R
 import dot.jcversa.novay.data.AnimeEpisode
 import dot.jcversa.novay.data.AnimeSearchResult
 import dot.jcversa.novay.data.AnimeSeason
 import dot.jcversa.novay.data.AnimeSource
+import dot.jcversa.novay.data.GenreCatalog
 import dot.jcversa.novay.data.Library
 import dot.jcversa.novay.data.LibraryEntry
 import dot.jcversa.novay.data.ResolvedStream
@@ -135,6 +139,13 @@ fun ShowScreen(
     var resumeEntry by remember { mutableStateOf<WatchHistoryEntry?>(null) }
     var downloadedBySeason by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var selectedSeason by remember(anime.url) { mutableStateOf<AnimeSeason?>(null) }
+    var showGenres by remember(anime.url) { mutableStateOf(GenreCatalog.normalizeList(anime.genres)) }
+    var resolvedPosterUrl by remember(anime.url, anime.posterUrl) {
+        mutableStateOf(dot.jcversa.novay.data.ImageUrlSanitizer.sanitizePosterUrl(anime.posterUrl))
+    }
+    val effectiveAnime = remember(anime, resolvedPosterUrl) {
+        if (resolvedPosterUrl != anime.posterUrl) anime.copy(posterUrl = resolvedPosterUrl) else anime
+    }
     var showActionsSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(anime.url, retryKey) {
@@ -146,6 +157,26 @@ fun ShowScreen(
             val ordered = orderByLanguage(loaded)
             if (selectedSeason == null || loaded.none { it.url == selectedSeason?.url }) {
                 selectedSeason = ordered.firstOrNull()?.second?.firstOrNull()
+            }
+            if (resolvedPosterUrl == null) {
+                val canonicalPoster = runCatching { source.resolvePosterUrl(anime) }.getOrNull()
+                if (canonicalPoster != null) {
+                    resolvedPosterUrl = canonicalPoster
+                    withContext(Dispatchers.IO) {
+                        Library.updatePoster(context, anime.url, canonicalPoster)
+                        WatchHistory.updatePoster(context, anime.url, canonicalPoster)
+                    }
+                }
+            }
+            val resolvedGenres = GenreCatalog.normalizeList(
+                runCatching { source.genres(anime) }.getOrDefault(emptyList())
+                    .ifEmpty { anime.genres }
+            )
+            if (resolvedGenres.isNotEmpty()) {
+                showGenres = resolvedGenres
+                withContext(Dispatchers.IO) {
+                    Library.updateGenres(context, anime.url, resolvedGenres)
+                }
             }
         } catch (e: Exception) {
             error = e.message ?: "Erreur inconnue"
@@ -176,12 +207,13 @@ fun ShowScreen(
 
     fun toggleFavorite() {
         val entry = LibraryEntry(
-            title = anime.title,
-            url = anime.url,
-            slug = anime.slug,
-            posterUrl = anime.posterUrl,
+            title = effectiveAnime.title,
+            url = effectiveAnime.url,
+            slug = effectiveAnime.slug,
+            posterUrl = effectiveAnime.posterUrl,
             languages = seasons.orEmpty().mapNotNull { it.language?.uppercase() }.distinct(),
-            addedAt = System.currentTimeMillis()
+            addedAt = System.currentTimeMillis(),
+            genres = showGenres,
         )
         inLibrary = Library.toggle(context, entry)
     }
@@ -215,7 +247,8 @@ fun ShowScreen(
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val isSplitPane = maxWidth >= 840.dp
+        val isSplitPane = maxWidth >= 720.dp || (maxWidth >= 600.dp && maxWidth > maxHeight)
+        val overlays = NovayTheme.overlays
 
         Column(
             modifier = Modifier
@@ -238,10 +271,11 @@ fun ShowScreen(
                 },
             )
 
+            val seasonList = seasons
             val viewKey = when {
                 error != null -> "error"
-                seasons == null -> "loading"
-                seasons!!.isEmpty() -> "empty"
+                seasonList == null -> "loading"
+                seasonList.isEmpty() -> "empty"
                 else -> "loaded"
             }
 
@@ -257,6 +291,8 @@ fun ShowScreen(
                     "error" -> ErrorView(
                         message = error ?: "Erreur inconnue",
                         onRetry = { retryKey++ },
+                        title = stringResource(R.string.error_catalog_title),
+                        icon = NovayIcons.ErrorSeal,
                         modifier = Modifier.padding(bottom = bottomChrome),
                     )
                     "loading" -> Box(
@@ -277,12 +313,13 @@ fun ShowScreen(
                                 LazyColumn(
                                     state = listState,
                                     modifier = Modifier
-                                        .width(400.dp)
+                                        .weight(0.42f)
+                                        .widthIn(min = 300.dp, max = 440.dp)
                                         .fillMaxHeight(),
                                     contentPadding = PaddingValues(bottom = 32.dp),
                                 ) {
                                     showOverviewAndSeasons(
-                                        anime = anime,
+                                        anime = effectiveAnime,
                                         seasons = seasons.orEmpty(),
                                         grouped = grouped,
                                         firstSeason = firstSeason,
@@ -294,6 +331,7 @@ fun ShowScreen(
                                         animateItems = !motion.reduceMotion,
                                         onResume = onResume,
                                         onToggleFavorite = ::toggleFavorite,
+                                        onPosterResolved = { resolvedPosterUrl = it },
                                         onSelectSeason = { season ->
                                             selectedSeason = season
                                             markSeasonSeen(season)
@@ -315,7 +353,7 @@ fun ShowScreen(
                                             onOpenPlayer(active, ep, offline)
                                         },
                                         modifier = Modifier
-                                            .weight(1f)
+                                            .weight(0.58f)
                                             .fillMaxHeight(),
                                     )
                                 }
@@ -333,7 +371,7 @@ fun ShowScreen(
                                     contentPadding = PaddingValues(bottom = 96.dp + bottomChrome),
                                 ) {
                                     showOverviewAndSeasons(
-                                        anime = anime,
+                                        anime = effectiveAnime,
                                         seasons = seasons.orEmpty(),
                                         grouped = grouped,
                                         firstSeason = firstSeason,
@@ -345,6 +383,7 @@ fun ShowScreen(
                                         animateItems = !motion.reduceMotion,
                                         onResume = onResume,
                                         onToggleFavorite = ::toggleFavorite,
+                                        onPosterResolved = { resolvedPosterUrl = it },
                                         onSelectSeason = { season ->
                                             markSeasonSeen(season)
                                             onOpenEpisodes(season)
@@ -384,8 +423,8 @@ fun ShowScreen(
         ) {
             ExtendedFloatingActionButton(
                 onClick = { resumeEntry?.let(onResume) },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
+                containerColor = overlays.ctaContainer,
+                contentColor = overlays.onCtaContainer,
                 modifier = Modifier.testTag("show_resume_fab"),
                 shape = CircleShape,
             ) {
@@ -441,11 +480,8 @@ fun ShowScreen(
                 )
                 firstSeason?.let { first ->
                     ShowSheetActionRow(
-                        label = if (resumeEntry != null) {
-                            "Reprendre Épisode ${resumeEntry!!.episodeNumber}"
-                        } else {
-                            "Ouvrir ${first.name}"
-                        },
+                        label = resumeEntry?.let { "Reprendre Épisode ${it.episodeNumber}" }
+                            ?: "Ouvrir ${first.name}",
                         icon = NovayIcons.Play,
                         onClick = {
                             showActionsSheet = false
@@ -521,6 +557,7 @@ private fun LazyListScope.showOverviewAndSeasons(
     animateItems: Boolean,
     onResume: (WatchHistoryEntry) -> Unit,
     onToggleFavorite: () -> Unit,
+    onPosterResolved: (String) -> Unit,
     onSelectSeason: (AnimeSeason) -> Unit,
 ) {
     item(key = "header", contentType = "hero") {
@@ -529,10 +566,12 @@ private fun LazyListScope.showOverviewAndSeasons(
             seasonCount = seasons.size,
             languages = grouped.map { it.first },
             parallaxOffsetProvider = parallaxOffsetProvider,
+            onPosterResolved = onPosterResolved,
         )
     }
 
     item(key = "actions", contentType = "actions") {
+        val overlays = NovayTheme.overlays
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -549,8 +588,8 @@ private fun LazyListScope.showOverviewAndSeasons(
                     }
                 },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    containerColor = overlays.ctaContainer,
+                    contentColor = overlays.onCtaContainer,
                 ),
                 modifier = Modifier
                     .weight(1f)
@@ -591,7 +630,7 @@ private fun LazyListScope.showOverviewAndSeasons(
                         MaterialTheme.colorScheme.surfaceContainerLow
                     },
                     contentColor = if (inLibrary) {
-                        MaterialTheme.colorScheme.primary
+                        overlays.crimsonOnContainer
                     } else {
                         MaterialTheme.colorScheme.onSurface
                     },
@@ -603,7 +642,7 @@ private fun LazyListScope.showOverviewAndSeasons(
                 NovayFavoriteMorphIcon(
                     inLibrary = inLibrary,
                     tint = if (inLibrary) {
-                        MaterialTheme.colorScheme.primary
+                        overlays.crimsonOnContainer
                     } else {
                         MaterialTheme.colorScheme.onSurface
                     },
@@ -620,30 +659,39 @@ private fun LazyListScope.showOverviewAndSeasons(
 
     grouped.forEach { (lang, langSeasons) ->
         stickyHeader(key = "sticky_${lang}", contentType = "lang_header") {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.background)
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.94f)),
             ) {
-                Box(
+                Row(
                     modifier = Modifier
-                        .size(width = 3.dp, height = 16.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (lang == "VF") {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.tertiary
-                            }
-                        ),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = "$lang · ${langSeasons.size} saison${if (langSeasons.size > 1) "s" else ""}",
-                    style = MaterialTheme.typography.header,
-                    color = MaterialTheme.colorScheme.onBackground,
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(width = 3.dp, height = 16.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (lang == "VF") {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.tertiary
+                                }
+                            ),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "$lang · ${langSeasons.size} saison${if (langSeasons.size > 1) "s" else ""}",
+                        style = MaterialTheme.typography.header,
+                        color = MaterialTheme.colorScheme.onBackground,
+                    )
+                }
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
                 )
             }
         }
@@ -672,13 +720,18 @@ private fun CinemaShowHeader(
     seasonCount: Int,
     languages: List<String>,
     parallaxOffsetProvider: () -> Float,
+    onPosterResolved: (String) -> Unit,
 ) {
     val posterShape = MaterialTheme.shapes.medium
     val overlays = NovayTheme.overlays
     Box(modifier = Modifier.fillMaxWidth()) {
+        val supportsBlur = Build.VERSION.SDK_INT >= 31
         PosterImage(
             url = anime.posterUrl,
             contentDescription = null,
+            animeUrl = anime.url,
+            animeTitle = anime.title,
+            onPosterResolved = onPosterResolved,
             modifier = Modifier
                 .matchParentSize()
                 .graphicsLayer {
@@ -686,16 +739,16 @@ private fun CinemaShowHeader(
                     scaleY = 1.08f
                     translationY = parallaxOffsetProvider()
                 }
-                .blur(16.dp)
-                .alpha(0.28f),
+                .then(if (supportsBlur) Modifier.blur(16.dp) else Modifier)
+                .alpha(if (supportsBlur) 0.28f else 0.16f),
         )
         Box(
             modifier = Modifier
                 .matchParentSize()
                 .background(
                     Brush.verticalGradient(
-                        0f to MaterialTheme.colorScheme.background.copy(alpha = 0.22f),
-                        0.6f to MaterialTheme.colorScheme.background.copy(alpha = 0.80f),
+                        0f to MaterialTheme.colorScheme.background.copy(alpha = if (supportsBlur) 0.22f else 0.44f),
+                        0.6f to MaterialTheme.colorScheme.background.copy(alpha = if (supportsBlur) 0.80f else 0.88f),
                         1f to MaterialTheme.colorScheme.background,
                     ),
                 ),
@@ -709,6 +762,9 @@ private fun CinemaShowHeader(
             PosterImage(
                 url = anime.posterUrl,
                 contentDescription = anime.title,
+                animeUrl = anime.url,
+                animeTitle = anime.title,
+                onPosterResolved = onPosterResolved,
                 modifier = Modifier
                     .size(width = 112.dp, height = 168.dp)
                     .novaySharedPoster(anime.url)
@@ -833,7 +889,7 @@ private fun SeasonRow(
                 imageVector = NovayIcons.ChevronRight,
                 contentDescription = "Voir les épisodes de ${season.name}",
                 tint = if (isActive) {
-                    MaterialTheme.colorScheme.primary
+                    NovayTheme.overlays.crimsonOnContainer
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },

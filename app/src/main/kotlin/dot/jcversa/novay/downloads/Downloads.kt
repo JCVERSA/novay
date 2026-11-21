@@ -1,70 +1,50 @@
 package dot.jcversa.novay.downloads
 
 import android.app.Notification
-import android.app.PendingIntent
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MimeTypes
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.database.StandaloneDatabaseProvider
-import androidx.media3.datasource.cache.CacheDataSource
-import androidx.media3.datasource.DataSource
-import androidx.media3.datasource.DataSpec
-import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.datasource.TransferListener
-import androidx.media3.exoplayer.offline.Download
-import androidx.media3.exoplayer.offline.DownloadHelper
-import androidx.media3.exoplayer.offline.DownloadManager
-import androidx.media3.exoplayer.offline.DownloadService
-import androidx.media3.exoplayer.scheduler.Requirements
 import androidx.core.app.NotificationCompat
-import androidx.media3.exoplayer.source.MediaSource
-import androidx.media3.exoplayer.source.ProgressiveMediaSource
-import androidx.media3.exoplayer.hls.HlsMediaSource
+import dot.jcversa.novay.data.DownloadChoice
 import dot.jcversa.novay.data.ResolvedStream
-import dot.jcversa.novay.data.sama.SamaParsers
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withTimeoutOrNull
-import java.io.File
-import java.io.IOException
-import java.net.URI
+import dot.jcversa.novay.data.sama.SamaParsers
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
 
 /**
- * Coordonnateur des téléchargements NoVaY (singleton, initialisé par
- * MainActivity) : cache offline (media3 SimpleCache), DownloadManager,
- * notifications de progression et MediaSources de lecture hors-ligne.
+ * Façade des téléchargements NoVaY (V2.5 « novabox ») : les épisodes
+ * deviennent de VRAIS FICHIERS dans Download/NoVaY/ du téléphone —
+ * nommés façon lisible (« Solo Leveling - S01E03 VOSTFR 1080p.mp4 »),
+ * visibles dans Fichiers/galerie/VLC, lus in-app depuis ces fichiers.
  *
- * Stockage : stockage externe PRIVÉ de l'appli
- * (Android/data/dot.jcversa.novay/files/offline) — aucune permission de
- * stockage requise ; le contenu est lisible par NoVaY uniquement.
+ * L'API publique est celle consommée par les écrans (V2.3/V2.4) : le
+ * moteur derrière (FileDownloadEngine) a changé, pas les contrats.
  */
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 object Downloads {
 
     const val CHANNEL_ID = "novay_downloads"
 
-    private const val PREFS = "novay_download_prefs"
-    private const val KEY_WIFI_ONLY = "wifi_only"
+    // ── États exposés (moteur fichier, plus de media3) ────────────────────
 
-    @Volatile private var appContext: Context? = null
-    @Volatile private var cacheInternal: androidx.media3.datasource.cache.SimpleCache? = null
-    @Volatile private var managerInternal: DownloadManager? = null
-    private val changeEvents = MutableSharedFlow<Unit>(
-        replay = 0,
-        extraBufferCapacity = 1,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST
-    )
+    private const val STATE_QUEUED = 1
+    private const val STATE_RUNNING = 2
+    private const val STATE_PAUSED = 3
+    private const val STATE_COMPLETED = 4
+    private const val STATE_FAILED = 5
 
     /** État d'un téléchargement, exposé à l'UI. */
     data class DownloadInfo(
@@ -76,129 +56,111 @@ object Downloads {
         val bytesDownloaded: Long = 0L,
         val totalBytes: Long = 0L
     ) {
-        val isCompleted: Boolean get() = state == Download.STATE_COMPLETED
-        val isFailed: Boolean get() = state == Download.STATE_FAILED
+        val isCompleted: Boolean get() = state == STATE_COMPLETED
+        val isFailed: Boolean get() = state == STATE_FAILED
         val isActive: Boolean
-            get() = state == Download.STATE_DOWNLOADING || state == Download.STATE_QUEUED ||
-                state == Download.STATE_RESTARTING
+            get() = state == STATE_RUNNING || state == STATE_QUEUED
     }
 
+    /**
+     * File réactive (V2.6, architecture owner) : émise à chaque changement
+     * du moteur ; rafraîchie toutes les 750 ms uniquement pendant qu'un
+     * téléchargement est actif — zéro polling quand tout est calme.
+     */
     data class QueueSnapshot(
         val items: List<DownloadInfo>,
         val paused: Boolean
     )
 
-    fun init(context: Context) {
-        if (appContext != null) return
-        appContext = context.applicationContext
-        StreamHeadersRegistry.init(context)
-        createChannel(context.applicationContext)
-        // Instancie le manager (charge l'index persisté + reprend les
-        // téléchargements interrompus).
-        manager(context.applicationContext)
-        // Contrainte réseau persistée (V2.3) : Wi-Fi uniquement ?
-        if (isWifiOnly(context)) {
-            runCatching {
-                manager(context.applicationContext)
-                    .setRequirements(Requirements(Requirements.NETWORK_UNMETERED))
+    fun observeQueue(context: Context): Flow<QueueSnapshot> = flow {
+        val appCtx = context.applicationContext
+        while (true) {
+            val items = snapshot(appCtx)
+            val isPaused = FileDownloadEngine.downloadsPaused()
+            emit(QueueSnapshot(items = items, paused = isPaused))
+            if (items.any { it.isActive }) {
+                withTimeoutOrNull(750L) { FileDownloadEngine.changes().first() }
+            } else {
+                FileDownloadEngine.changes().first()
             }
         }
+    }.distinctUntilChanged().flowOn(Dispatchers.IO)
+
+    fun observeSnapshots(context: Context): Flow<List<DownloadInfo>> =
+        observeQueue(context).map { it.items }.distinctUntilChanged()
+
+    /** Vue « manager » (compatibilité écrans V2.4 : downloadsPaused). */
+    class ManagerView(context: Context) {
+        val downloadsPaused: Boolean
+            get() = FileDownloadEngine.downloadsPaused()
     }
 
-    /** True si l'utilisateur a demandé « Wi-Fi uniquement ». */
+    fun manager(@Suppress("UNUSED_PARAMETER") context: Context): ManagerView = ManagerView(context)
+
+    // ── Préférences ───────────────────────────────────────────────────────
+
+    private const val PREFS = "novay_download_prefs"
+    private const val KEY_WIFI_ONLY = "wifi_only"
+
     fun isWifiOnly(context: Context): Boolean =
         context.applicationContext
             .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_WIFI_ONLY, false)
 
-    /**
-     * Active/interrompt « Wi-Fi uniquement » : les téléchargements se
-     * mettent en attente en 4G et reprennent tout seuls en Wi-Fi
-     * (Requirements media3 — inspiration Downpour/Ketch).
-     */
     fun setWifiOnly(context: Context, wifiOnly: Boolean) {
         context.applicationContext
             .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putBoolean(KEY_WIFI_ONLY, wifiOnly).apply()
-        runCatching {
-            manager(context).setRequirements(
-                if (wifiOnly) Requirements(Requirements.NETWORK_UNMETERED) else Requirements(0)
-            )
-        }
+        FileDownloadEngine.setWifiOnly(wifiOnly)
     }
 
-    fun manager(context: Context): DownloadManager {
-        managerInternal?.let { return it }
-        synchronized(this) {
-            managerInternal?.let { return it }
-            val ctx = context.applicationContext
-            val dbProvider = StandaloneDatabaseProvider(ctx)
-            val dir = File(
-                ctx.getExternalFilesDir(null) ?: ctx.filesDir,
-                "offline"
-            )
-            val cache = androidx.media3.datasource.cache.SimpleCache(
-                dir,
-                androidx.media3.datasource.cache.NoOpCacheEvictor(),
-                dbProvider
-            )
-            cacheInternal = cache
-            DownloadManager(
-                ctx,
-                dbProvider,
-                cache,
-                RegistryDataSourceFactory()
-            ) { it.run() }.also { dm ->
-                dm.maxParallelDownloads = 1
-                dm.addListener(object : DownloadManager.Listener {
-                    override fun onInitialized(downloadManager: DownloadManager) {
-                        changeEvents.tryEmit(Unit)
-                    }
+    // ── Cycle de vie ──────────────────────────────────────────────────────
 
-                    override fun onDownloadChanged(
-                        downloadManager: DownloadManager,
-                        download: Download,
-                        finalException: Exception?
-                    ) {
-                        changeEvents.tryEmit(Unit)
-                    }
-
-                    override fun onDownloadRemoved(
-                        downloadManager: DownloadManager,
-                        download: Download
-                    ) {
-                        changeEvents.tryEmit(Unit)
-                    }
-
-                    override fun onIdle(downloadManager: DownloadManager) {
-                        changeEvents.tryEmit(Unit)
-                    }
-
-                    override fun onDownloadsPausedChanged(
-                        downloadManager: DownloadManager,
-                        paused: Boolean
-                    ) {
-                        changeEvents.tryEmit(Unit)
-                    }
-                })
-                managerInternal = dm
-            }
+    fun init(context: Context) {
+        createChannel(context)
+        FileDownloadEngine.onNotification = {
+            NovayDownloadService.notifyState(context.applicationContext)
         }
-        return managerInternal!!
+        FileDownloadEngine.init(context)
     }
 
-    fun cache(context: Context): androidx.media3.datasource.cache.SimpleCache =
-        cacheInternal ?: synchronized(this) {
-            manager(context) // construit aussi le cache
-            cacheInternal!!
-        }
+    // ── File ──────────────────────────────────────────────────────────────
+
+    fun downloadId(seasonUrl: String, episodeNumber: Int): String =
+        "${seasonUrl.trimEnd('/')}#ep$episodeNumber"
+
+    /** L'épisode de cette saison est-il téléchargé (fichier publié) ? */
+    fun isDownloaded(context: Context, seasonUrl: String, episodeNumber: Int): Boolean =
+        FileDownloadEngine.find(downloadId(seasonUrl, episodeNumber))?.isCompleted == true
 
     /**
-     * Lance le téléchargement d'un épisode.
-     *
-     * @param preferredHeight hauteur choisie par l'utilisateur (V2.3) ;
-     *   null = meilleure qualité de ce lecteur. Si ce lecteur ne propose
-     *   pas la hauteur, repli honnête sur sa meilleure.
+     * Flux de lecture de l'épisode téléchargé : LE FICHIER du téléphone
+     * (content:///file://), jamais le réseau. Null si absent/incomplet.
+     */
+    fun downloadedStream(context: Context, seasonUrl: String, episodeNumber: Int): ResolvedStream? {
+        FileDownloadEngine.init(context)
+        val stream = FileDownloadEngine.find(downloadId(seasonUrl, episodeNumber))
+            ?.takeIf { it.isCompleted }
+            ?.meta
+            ?.toStream()
+            ?: return null
+        // Le fichier a pu être supprimé depuis Fichiers/VLC : on ne renvoie
+        // un flux local que s'il est réellement lisible (sinon repli réseau).
+        val readable = runCatching {
+            val uri = android.net.Uri.parse(stream.url)
+            when (uri.scheme) {
+                "file" -> java.io.File(uri.path ?: "").exists()
+                "content" -> context.contentResolver.openInputStream(uri)?.close() != null
+                else -> false
+            }
+        }.getOrDefault(false)
+        return if (readable) stream else null
+    }
+
+    /**
+     * Met un épisode en file : la VARIANTE choisie par l'utilisateur est
+     * résolue (DownloadChoice), les métadonnées embarquent l'URL de sa
+     * playlist + les en-têtes du lecteur.
      */
     fun startEpisodeDownload(
         context: Context,
@@ -212,7 +174,7 @@ object Downloads {
         onStart: () -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
-        val choice = dot.jcversa.novay.data.DownloadChoice.pick(stream, preferredHeight)
+        val choice = DownloadChoice.pick(stream, preferredHeight)
         val meta = EpisodeDownloadMeta(
             animeTitle = animeTitle,
             seasonName = seasonName,
@@ -221,183 +183,156 @@ object Downloads {
             episodeLabel = episodeLabel,
             streamUrl = choice.url,
             isHls = choice.isHls,
-            headers = stream.headers
+            headers = stream.headers,
+            qualityLabel = choice.qualityLabel
         )
-        // Les en-têtes exigés par l'hôte du flux, pour les DataSource de
-        // téléchargement et de lecture hors-ligne.
-        hostOf(choice.url)?.let { StreamHeadersRegistry.register(it, stream.headers) }
-        hostOf(stream.url)?.let { StreamHeadersRegistry.register(it, stream.headers) }
-
-        val mediaItem = MediaItem.Builder()
-            .setUri(choice.url)
-            .setMimeType(if (choice.isHls) MimeTypes.APPLICATION_M3U8 else MimeTypes.VIDEO_MP4)
-            .build()
-
-        val helper = DownloadHelper.Factory()
-            .setDataSourceFactory(RegistryDataSourceFactory())
-            .create(mediaItem)
-        helper.prepare(object : DownloadHelper.Callback {
-            override fun onPrepared(h: DownloadHelper, tracksInfoAvailable: Boolean) {
-                val request = h.getDownloadRequest(
-                    downloadId(seasonUrl, episodeNumber),
-                    meta.toJson().toByteArray(Charsets.UTF_8)
-                )
-                h.release()
-                DownloadService.sendAddDownload(
-                    context, NovayDownloadService::class.java, request, /* foreground= */ true
-                )
-                onStart()
-            }
-
-            override fun onPrepareError(h: DownloadHelper, e: IOException) {
-                h.release()
-                onError(e.message ?: "Préparation du téléchargement impossible")
-            }
-        })
+        FileDownloadEngine.enqueue(
+            context,
+            FileDownloadEngine.Task(
+                id = downloadId(seasonUrl, episodeNumber),
+                meta = meta
+            )
+        )
+        onStart()
     }
 
-    fun pauseAll(context: Context) =
-        DownloadService.sendPauseDownloads(context, NovayDownloadService::class.java, /* foreground= */ false)
-
-    fun resumeAll(context: Context) =
-        DownloadService.sendResumeDownloads(context, NovayDownloadService::class.java, /* foreground= */ false)
-
-    fun remove(context: Context, id: String) =
-        DownloadService.sendRemoveDownload(context, NovayDownloadService::class.java, id, /* foreground= */ false)
-
-    fun downloadId(seasonUrl: String, episodeNumber: Int): String =
-        "${seasonUrl.trimEnd('/')}#ep$episodeNumber"
-
-    /** L'épisode de cette saison est-il téléchargé (terminé) ? */
-    fun isDownloaded(context: Context, seasonUrl: String, episodeNumber: Int): Boolean =
-        manager(context).downloadIndex.getDownload(downloadId(seasonUrl, episodeNumber))
-            ?.state == Download.STATE_COMPLETED
-
-    /** Snapshot des téléchargements pour l'UI (index persisté). */
+    /** Snapshot pour l'UI (états, pourcentages, octets). */
     fun snapshot(context: Context): List<DownloadInfo> {
-        val out = mutableListOf<DownloadInfo>()
-        manager(context).downloadIndex.getDownloads().use { cursor ->
-            while (cursor.moveToNext()) {
-                val d = cursor.download
-                out.add(
-                    DownloadInfo(
-                        id = d.request.id,
-                        state = d.state,
-                        percent = d.percentDownloaded,
-                        meta = EpisodeDownloadMeta.fromJson(d.request.data),
-                        bytesDownloaded = d.bytesDownloaded,
-                        totalBytes = d.contentLength
-                    )
-                )
+        FileDownloadEngine.init(context)
+        return FileDownloadEngine.tasks().map { task ->
+            val percent = if (task.isCompleted) {
+                100f
+            } else if (task.bytesTotal > 0) {
+                (task.bytesDone * 100f / task.bytesTotal).coerceIn(0f, 100f)
+            } else {
+                0f
             }
+            DownloadInfo(
+                id = task.id,
+                state = when (task.state) {
+                    FileDownloadEngine.State.QUEUED -> STATE_QUEUED
+                    FileDownloadEngine.State.RUNNING -> STATE_RUNNING
+                    FileDownloadEngine.State.WAITING_WIFI -> STATE_QUEUED
+                    FileDownloadEngine.State.PAUSED -> STATE_PAUSED
+                    FileDownloadEngine.State.DONE -> STATE_COMPLETED
+                    FileDownloadEngine.State.FAILED -> STATE_FAILED
+                },
+                percent = percent,
+                meta = task.meta,
+                bytesDownloaded = task.bytesDone,
+                totalBytes = if (task.isCompleted) task.bytesDone else task.bytesTotal
+            )
         }
-        return out
     }
+
+    fun pauseAll(context: Context) {
+        FileDownloadEngine.pauseAll()
+        NovayDownloadService.notifyState(context)
+    }
+
+    fun resumeAll(context: Context) {
+        FileDownloadEngine.resumeAll()
+        NovayDownloadService.notifyState(context)
+    }
+
+    /** Annule un téléchargement + supprime SON fichier publié. */
+    fun remove(context: Context, id: String) {
+        FileDownloadEngine.cancel(context, id)
+        NovayDownloadService.notifyState(context)
+    }
+
+    // ── Lecture in-app ────────────────────────────────────────────────────
 
     /**
-     * Flux réactif de la file complète (éléments + état global de pause) :
-     * s'appuie sur [DownloadManager.Listener] au repos (0 requête SQLite)
-     * et rafraîchit toutes les 750 ms uniquement lorsqu'un téléchargement est actif.
+     * Source de lecture : l'épisode téléchargé se lit DEPUIS LE FICHIER
+     * du téléphone (content:// ou file://) ; en ligne, la source HTTP
+     * du flux avec ses en-têtes.
      */
-    fun observeQueue(context: Context): Flow<QueueSnapshot> = flow {
-        val appCtx = context.applicationContext
-        while (true) {
-            val items = snapshot(appCtx)
-            val isPaused = runCatching { manager(appCtx).downloadsPaused }.getOrDefault(false)
-            emit(QueueSnapshot(items = items, paused = isPaused))
-            if (items.any { it.isActive }) {
-                withTimeoutOrNull(750L) { changeEvents.first() }
-            } else {
-                changeEvents.first()
-            }
-        }
-    }.distinctUntilChanged().flowOn(Dispatchers.IO)
-
-    fun observeSnapshots(context: Context): Flow<List<DownloadInfo>> =
-        observeQueue(context).let { queueFlow ->
-            flow {
-                queueFlow.collect { emit(it.items) }
-            }.distinctUntilChanged()
-        }
-
-    /** MediaSource de lecture : cache offline d'abord, réseau en repli. */
     fun offlineMediaSource(
         context: Context,
         stream: ResolvedStream
-    ): MediaSource {
-        val httpFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent(stream.headers["User-Agent"] ?: SamaParsers.UA)
-            .setDefaultRequestProperties(stream.headers - "User-Agent")
-            .setAllowCrossProtocolRedirects(true)
-        val cacheFactory = CacheDataSource.Factory()
-            .setCache(cache(context))
-            .setUpstreamDataSourceFactory(httpFactory)
-            .setCacheWriteDataSinkFactory(null) // lecture : pas de ré-écriture
-        return if (stream.isHls) {
-            HlsMediaSource.Factory(cacheFactory).createMediaSource(MediaItem.fromUri(stream.url))
+    ): ProgressiveMediaSource {
+        val url = stream.url
+        val isLocal = url.startsWith("content://") || url.startsWith("file://") ||
+            url.startsWith("/")
+        val factory = if (isLocal) {
+            DefaultDataSource.Factory(context)
         } else {
-            ProgressiveMediaSource.Factory(cacheFactory)
-                .createMediaSource(MediaItem.fromUri(stream.url))
+            val httpFactory = DefaultHttpDataSource.Factory()
+                .setUserAgent(stream.headers["User-Agent"] ?: SamaParsers.UA)
+                .setDefaultRequestProperties(stream.headers - "User-Agent")
+                .setAllowCrossProtocolRedirects(true)
+            DefaultDataSource.Factory(context, httpFactory)
         }
+        // Type explicite : le lecteur intégré n'a pas à deviner le
+        // conteneur d'un fichier local (MP4 fMP4 ou TS brut).
+        val item = MediaItem.Builder().setUri(url).apply {
+            when {
+                url.endsWith(".mp4", true) -> setMimeType(MimeTypes.VIDEO_MP4)
+                url.endsWith(".ts", true) -> setMimeType(MimeTypes.VIDEO_MP2T)
+            }
+        }.build()
+        return ProgressiveMediaSource.Factory(factory)
+            .createMediaSource(item)
     }
 
+    // ── Notification pilotable (V2.3, inspiration Ketch) ──────────────────
+
     /**
-     * Notification de progression PILOTABLE (V2.3, inspiration Ketch) :
-     * boutons Pause / Reprendre / Annuler directement dans le tiroir de
-     * notifications — inutile de rouvrir l'appli pour mettre en pause.
+     * Notification de progression : boutons Pause / Reprendre / Annuler
+     * directement dans le tiroir de notifications.
      */
-    fun progressNotification(
-        context: Context,
-        downloads: List<Download>,
-        notMetRequirements: Int
-    ): Notification {
-        val active = downloads.filter {
-            it.state == Download.STATE_DOWNLOADING || it.state == Download.STATE_RESTARTING
+    fun progressNotification(context: Context): Notification {
+        val infos = snapshot(context)
+        val active = infos.filter { it.isActive }
+        val queued = infos.filter { it.state == STATE_QUEUED }
+        val paused = infos.filter { it.state == STATE_PAUSED }
+        val done = infos.count { it.isCompleted }
+        val failed = infos.filter { it.isFailed }
+
+        val enginePaused = FileDownloadEngine.downloadsPaused()
+        val wifiOnly = isWifiOnly(context)
+
+        val (title, text) = when {
+            active.isNotEmpty() -> {
+                val current = active.firstOrNull { it.state == STATE_RUNNING } ?: active.first()
+                "Téléchargements NoVaY" to
+                    "${active.size} en cours · ${current.percent.toInt()} % · ${queued.size} en file"
+            }
+            enginePaused && paused.isNotEmpty() ->
+                "Téléchargements NoVaY" to "En pause (${paused.size} en attente)"
+            failed.isNotEmpty() ->
+                "Téléchargements NoVaY" to
+                    "${failed.size} échec(s) — ${failed.first().meta?.episodeLabel ?: ""}"
+            done > 0 && infos.all { it.isCompleted } ->
+                "Téléchargements NoVaY" to "Terminé — $done épisode(s) dans Download/NoVaY"
+            queued.isNotEmpty() && wifiOnly ->
+                "Téléchargements NoVaY" to "En attente du Wi-Fi (${queued.size})"
+            queued.isNotEmpty() ->
+                "Téléchargements NoVaY" to "En file (${queued.size})"
+            else -> "Téléchargements NoVaY" to "Aucun téléchargement"
         }
-        val queued = downloads.filter { it.state == Download.STATE_QUEUED }
-        val pausedGlobally = runCatching {
-            manager(context).downloadsPaused
-        }.getOrDefault(false)
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle("Téléchargements NoVaY")
+            .setContentTitle(title)
+            .setContentText(text)
             .setOnlyAlertOnce(true)
-            .setOngoing(true)
+            .setOngoing(active.isNotEmpty())
+            .setPriority(NotificationCompat.PRIORITY_LOW)
 
-        when {
-            active.isNotEmpty() -> {
-                val percents = active.map { it.percentDownloaded }.filter { it >= 0f }
-                val percent = if (percents.isEmpty()) -1 else percents.sum().toInt() / percents.size
-                val suffix = if (queued.isNotEmpty()) " · ${queued.size} en file" else ""
-                builder
-                    .setContentText(
-                        "${active.size} en cours · ${percent.coerceAtLeast(0)} %$suffix"
-                    )
-                    .setProgress(100, percent.coerceAtLeast(0), percent < 0)
-                    .addAction(
-                        0, "Pause",
-                        actionIntent(context, NovayDownloadService.ACTION_PAUSE_ALL, 1)
-                    )
+        if (infos.isNotEmpty()) {
+            if (enginePaused) {
+                builder.addAction(
+                    0, "Reprendre",
+                    actionIntent(context, NovayDownloadService.ACTION_RESUME_ALL, 2)
+                )
+            } else {
+                builder.addAction(
+                    0, "Pause",
+                    actionIntent(context, NovayDownloadService.ACTION_PAUSE_ALL, 1)
+                )
             }
-            pausedGlobally || queued.isNotEmpty() -> {
-                val label = when {
-                    notMetRequirements != 0 -> "En attente du réseau"
-                    pausedGlobally -> "En pause"
-                    else -> "En file"
-                }
-                builder
-                    .setContentText(label)
-                    .addAction(
-                        0, "Reprendre",
-                        actionIntent(context, NovayDownloadService.ACTION_RESUME_ALL, 2)
-                    )
-            }
-            else -> builder.setContentText("Terminé")
-        }
-
-        // Annuler reste possible tant qu'il y a du travail.
-        if (active.isNotEmpty() || queued.isNotEmpty()) {
             builder.addAction(
                 0, "Annuler",
                 actionIntent(context, NovayDownloadService.ACTION_CANCEL_ALL, 3)
@@ -408,74 +343,23 @@ object Downloads {
 
     private fun actionIntent(context: Context, action: String, requestCode: Int): PendingIntent =
         PendingIntent.getService(
-            context.applicationContext,
+            context,
             requestCode,
-            Intent(context.applicationContext, NovayDownloadService::class.java).setAction(action),
-            PendingIntent.FLAG_IMMUTABLE
+            Intent(context, NovayDownloadService::class.java).setAction(action),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
     private fun createChannel(context: Context) {
-        if (Build.VERSION.SDK_INT >= 26) {
-            val nm = context.getSystemService(NotificationManager::class.java) ?: return
-            nm.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "Téléchargements", NotificationManager.IMPORTANCE_LOW)
-            )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Téléchargements NoVaY",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Progression des téléchargements d'épisodes"
+            }
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(channel)
         }
     }
-
-    private fun hostOf(url: String): String? = try {
-        URI(url).host
-    } catch (_: Exception) {
-        null
-    }
-}
-
-/**
- * DataSource HTTP qui signe chaque requête avec les en-têtes enregistrés
- * pour l'hôte demandé (Referer/Origin du lecteur d'origine).
- *
- * La Factory de DefaultHttpDataSource COPIE la map d'en-têtes
- * (clearAndSet) : un registre « vivant » ne peut pas s'y brancher. On
- * reconstruit donc le délégué à chaque open(), avec les en-têtes de
- * L'URL ouverte — un DataSource par instance = aucune course possible
- * entre téléchargements parallèles.
- */
-@UnstableApi
-class RegistryDataSource : DataSource {
-
-    private val listeners = mutableListOf<TransferListener>()
-    private var delegate: DataSource? = null
-
-    override fun addTransferListener(transferListener: TransferListener) {
-        listeners.add(transferListener)
-        delegate?.addTransferListener(transferListener)
-    }
-
-    override fun open(dataSpec: DataSpec): Long {
-        val host = dataSpec.uri.host ?: ""
-        val headers = StreamHeadersRegistry.headersFor(host)
-        val ds = DefaultHttpDataSource.Factory()
-            .setUserAgent(headers["User-Agent"] ?: SamaParsers.UA)
-            .setDefaultRequestProperties(headers - "User-Agent")
-            .setAllowCrossProtocolRedirects(true)
-            .createDataSource()
-        listeners.forEach { ds.addTransferListener(it) }
-        delegate = ds
-        return ds.open(dataSpec)
-    }
-
-    override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
-        delegate?.read(buffer, offset, length)
-            ?: throw IllegalStateException("DataSource non ouvert")
-
-    override fun getUri() = delegate?.uri
-
-    override fun close() {
-        delegate?.close()
-    }
-}
-
-@UnstableApi
-class RegistryDataSourceFactory : DataSource.Factory {
-    override fun createDataSource(): DataSource = RegistryDataSource()
 }

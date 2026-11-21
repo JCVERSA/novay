@@ -46,6 +46,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dot.jcversa.novay.R
+import dot.jcversa.novay.ui.theme.NovayTheme
+import androidx.compose.ui.res.stringResource
 
 /**
  * Cartes animés style Aniyomi & Midnight Noir :
@@ -62,6 +65,7 @@ fun ContinueReadingButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val overlays = NovayTheme.overlays
     Box(
         modifier = modifier.minimumInteractiveComponentSize(),
         contentAlignment = Alignment.Center,
@@ -73,13 +77,13 @@ fun ContinueReadingButton(
                 .testTag("continue_reading_button"),
             shape = CircleShape,
             colors = IconButtonDefaults.filledIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
+                containerColor = overlays.ctaContainer,
+                contentColor = overlays.onCtaContainer,
             ),
         ) {
             Icon(
                 imageVector = NovayIcons.Play,
-                contentDescription = "Reprendre la lecture",
+                contentDescription = stringResource(R.string.action_resume_episode),
                 modifier = Modifier.size(iconSize),
             )
         }
@@ -91,7 +95,7 @@ fun AnimeComfortableGridItem(
     title: String,
     posterUrl: String?,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     animeUrl: String = "",
     sharedTransitionEnabled: Boolean = true,
@@ -125,7 +129,13 @@ fun AnimeComfortableGridItem(
             }
             .clip(shape)
             .selectedBackground(isSelected)
-            .semantics(mergeDescendants = true) {}
+            .then(
+                if (onClickContinue == null) {
+                    Modifier.semantics(mergeDescendants = true) {}
+                } else {
+                    Modifier
+                }
+            )
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = ripple(),
@@ -154,6 +164,8 @@ fun AnimeComfortableGridItem(
             PosterImage(
                 url = posterUrl,
                 contentDescription = title,
+                animeUrl = animeUrl.ifBlank { null },
+                animeTitle = title,
                 modifier = Modifier
                     .matchParentSize()
                     .alpha(if (isSelected) 0.72f else 1f),
@@ -190,7 +202,7 @@ fun AnimeCompactGridItem(
     title: String,
     posterUrl: String?,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     animeUrl: String = "",
     sharedTransitionEnabled: Boolean = true,
@@ -237,7 +249,13 @@ fun AnimeCompactGridItem(
                 }
             )
             .selectedBackground(isSelected)
-            .semantics(mergeDescendants = true) {}
+            .then(
+                if (onClickContinue == null) {
+                    Modifier.semantics(mergeDescendants = true) {}
+                } else {
+                    Modifier
+                }
+            )
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = ripple(),
@@ -248,6 +266,8 @@ fun AnimeCompactGridItem(
         PosterImage(
             url = posterUrl,
             contentDescription = title,
+            animeUrl = animeUrl.ifBlank { null },
+            animeTitle = title,
             modifier = Modifier
                 .matchParentSize()
                 .alpha(if (isSelected) 0.72f else 1f),
@@ -299,7 +319,7 @@ fun AnimeListItem(
     title: String,
     posterUrl: String?,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     animeUrl: String = "",
     sharedTransitionEnabled: Boolean = true,
@@ -342,7 +362,13 @@ fun AnimeListItem(
                 scaleY = scale
             }
             .clip(shape)
-            .semantics(mergeDescendants = true) {}
+            .then(
+                if (onClickContinue == null) {
+                    Modifier.semantics(mergeDescendants = true) {}
+                } else {
+                    Modifier
+                }
+            )
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = ripple(),
@@ -357,6 +383,8 @@ fun AnimeListItem(
             PosterImage(
                 url = posterUrl,
                 contentDescription = title,
+                animeUrl = animeUrl.ifBlank { null },
+                animeTitle = title,
                 modifier = Modifier
                     .size(width = 58.dp, height = 84.dp)
                     .novaySharedPoster(animeUrl = animeUrl, enabled = sharedTransitionEnabled)

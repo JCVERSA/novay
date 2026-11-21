@@ -186,9 +186,9 @@ class SamaSourcePerformanceTest {
                     url == "https://anime-sama.to/api/lien.php?j=fresh_tok&l=11" ->
                         htmlResponse(req, 200, """{"u":"https://player.example/e2"}""", "application/json")
                     url == "https://player.example/e1" ->
-                        htmlResponse(req, 200, """source="https://cdn.example/v1/stream.mp4"""")
+                        htmlResponse(req, 200, "source=\"https://cdn.example/v1/stream.mp4\"")
                     url == "https://player.example/e2" ->
-                        htmlResponse(req, 200, """source="https://cdn.example/v2/stream.mp4"""")
+                        htmlResponse(req, 200, "source=\"https://cdn.example/v2/stream.mp4\"")
                     else -> htmlResponse(req, 404, "")
                 }
             }

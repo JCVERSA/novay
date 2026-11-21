@@ -49,6 +49,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dot.jcversa.novay.R
 import dot.jcversa.novay.data.WatchHistory
 import dot.jcversa.novay.data.WatchHistoryEntry
 import dot.jcversa.novay.ui.LocalBottomChromePadding
@@ -142,6 +143,7 @@ fun HistoryScreen(
                 "loading" -> RowListSkeleton(modifier = Modifier.padding(bottom = bottomChrome))
                 "empty" -> EmptyScreen(
                     icon = NovayIcons.HistoryClock,
+                    lottieRes = R.raw.lottie_clock,
                     headingText = "Aucun historique",
                     subtitleText = "Les épisodes que tu lances s'affichent ici avec ta position exacte pour reprendre instantanément.",
                     modifier = Modifier.padding(bottom = bottomChrome),
@@ -161,12 +163,12 @@ fun HistoryScreen(
                                 key = "header_${group.dayLabel}",
                                 contentType = "history_day_header",
                             ) {
+                                val headerMod = if (motion.reduceMotion) Modifier else Modifier.animateItem()
                                 Text(
                                     text = group.dayLabel,
                                     style = MaterialTheme.typography.header,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier
-                                        .animateItem()
+                                    modifier = headerMod
                                         .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp),
                                 )
                             }
@@ -175,8 +177,9 @@ fun HistoryScreen(
                                 key = { "${it.seasonUrl}#${it.episodeNumber}" },
                                 contentType = { "history_row" },
                             ) { entry ->
+                                val itemMod = if (motion.reduceMotion) Modifier else Modifier.animateItem()
                                 HistoryRow(
-                                    modifier = Modifier.animateItem(),
+                                    modifier = itemMod,
                                     entry = entry,
                                     onResume = { onResume(entry) },
                                     onRemove = {
@@ -244,10 +247,12 @@ private fun HistoryRow(
     modifier: Modifier = Modifier,
 ) {
     val shape = MaterialTheme.shapes.medium
+    val motion = LocalSlateMotion.current
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
     val containerColor by animateColorAsState(
         targetValue = if (hovered) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+        animationSpec = motion.colorSpec(180),
         label = "history_row_bg",
     )
 
@@ -258,10 +263,10 @@ private fun HistoryRow(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
             .clip(shape)
-            .semantics(mergeDescendants = true) {}
             .clickable(
                 interactionSource = interactionSource,
                 indication = ripple(),
+                onClickLabel = "Reprendre ${entry.animeTitle}",
                 onClick = onResume,
             ),
     ) {
@@ -269,9 +274,14 @@ private fun HistoryRow(
             modifier = Modifier.padding(start = 12.dp, top = 10.dp, end = 6.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val resolvedAnimeUrl = entry.animeUrl.ifBlank {
+                dot.jcversa.novay.data.ImageUrlSanitizer.extractAnimeUrlFromSeasonUrl(entry.seasonUrl) ?: ""
+            }
             PosterImage(
                 url = entry.posterUrl,
                 contentDescription = entry.animeTitle,
+                animeUrl = resolvedAnimeUrl.ifBlank { null },
+                animeTitle = entry.animeTitle,
                 modifier = Modifier
                     .size(width = 58.dp, height = 84.dp)
                     .clip(MaterialTheme.shapes.extraSmall),

@@ -24,7 +24,8 @@ data class LibraryEntry(
     val languages: List<String> = emptyList(),
     val addedAt: Long = 0L,
     val baseline: Map<String, Int> = emptyMap(),
-    val lastCounts: Map<String, Int> = emptyMap()
+    val lastCounts: Map<String, Int> = emptyMap(),
+    val genres: List<String> = emptyList()
 ) {
     /** Nombre d'épisodes apparus depuis la dernière visite. */
     val newEpisodes: Int
@@ -37,7 +38,8 @@ data class LibraryEntry(
         title = title,
         url = url,
         slug = slug,
-        posterUrl = posterUrl
+        posterUrl = posterUrl,
+        genres = genres
     )
 }
 
@@ -55,9 +57,23 @@ object Library {
      *  est conservé, la liste reste bornée. */
     fun upsert(entries: List<LibraryEntry>, entry: LibraryEntry): List<LibraryEntry> {
         val kept = entries.filter { it.url.trimEnd('/') != entry.url.trimEnd('/') }
+        val normalizedGenres = GenreCatalog.normalizeList(entry.genres)
+        val cleanIncomingPoster = ImageUrlSanitizer.sanitizePosterUrl(entry.posterUrl)
         val merged = entries.firstOrNull { it.url.trimEnd('/') == entry.url.trimEnd('/') }
-            ?.let { entry.copy(baseline = it.baseline, lastCounts = it.lastCounts) }
-            ?: entry
+            ?.let { existing ->
+                val resolvedPoster = cleanIncomingPoster
+                    ?: ImageUrlSanitizer.sanitizePosterUrl(existing.posterUrl)
+                entry.copy(
+                    posterUrl = resolvedPoster,
+                    baseline = existing.baseline,
+                    lastCounts = existing.lastCounts,
+                    genres = if (normalizedGenres.isNotEmpty()) normalizedGenres else existing.genres,
+                )
+            }
+            ?: entry.copy(
+                posterUrl = cleanIncomingPoster,
+                genres = normalizedGenres,
+            )
         return (listOf(merged) + kept).take(MAX)
     }
 
@@ -106,6 +122,7 @@ object Library {
                     .put("addedAt", e.addedAt)
                     .put("baseline", countsJson(e.baseline))
                     .put("lastCounts", countsJson(e.lastCounts))
+                    .put("genres", JSONArray(e.genres))
             )
         }
         return arr.toString()
@@ -118,11 +135,13 @@ object Library {
             (0 until arr.length()).mapNotNull { i ->
                 val o = arr.optJSONObject(i) ?: return@mapNotNull null
                 val langs = o.optJSONArray("languages")
+                val genresArr = o.optJSONArray("genres")
+                val rawPoster = o.optString("posterUrl").ifEmpty { null }
                 LibraryEntry(
                     title = o.optString("title"),
                     url = o.optString("url"),
                     slug = o.optString("slug"),
-                    posterUrl = o.optString("posterUrl").ifEmpty { null },
+                    posterUrl = ImageUrlSanitizer.sanitizePosterUrl(rawPoster) ?: rawPoster,
                     languages = if (langs == null) {
                         emptyList()
                     } else {
@@ -130,7 +149,14 @@ object Library {
                     },
                     addedAt = o.optLong("addedAt"),
                     baseline = countsFromJson(o.optJSONObject("baseline")),
-                    lastCounts = countsFromJson(o.optJSONObject("lastCounts"))
+                    lastCounts = countsFromJson(o.optJSONObject("lastCounts")),
+                    genres = if (genresArr == null) {
+                        emptyList()
+                    } else {
+                        GenreCatalog.normalizeList(
+                            (0 until genresArr.length()).mapNotNull { genresArr.opt(it) as? String }
+                        )
+                    },
                 )
             }
         } catch (_: Exception) {
@@ -211,5 +237,51 @@ object Library {
             val next = markSeasonSeen(current, seasonUrl, count)
             if (next != current) save(context, next)
         }
+    }
+
+    /** Met à jour les genres d'un animé déjà suivi sans réinitialiser ses compteurs. */
+    fun updateGenres(context: Context, url: String, genres: List<String>) {
+        val normalizedGenres = GenreCatalog.normalizeList(genres)
+        if (normalizedGenres.isEmpty()) return
+        synchronized(this) {
+            val normalizedUrl = url.trimEnd('/')
+            val current = all(context)
+            var changed = false
+            val next = current.map { entry ->
+                if (entry.url.trimEnd('/') == normalizedUrl && entry.genres != normalizedGenres) {
+                    changed = true
+                    entry.copy(genres = normalizedGenres)
+                } else {
+                    entry
+                }
+            }
+            if (changed) save(context, next)
+        }
+    }
+
+    /** Répare ou met à jour l'URL d'affiche d'un animé suivi sans toucher à ses compteurs ni son ordre. */
+    fun updatePoster(context: Context, url: String, posterUrl: String): Boolean {
+        val normalizedPoster = ImageUrlSanitizer.sanitizePosterUrl(posterUrl) ?: return false
+        val targetKey = catalogIdentityKey(url)
+        synchronized(this) {
+            val current = all(context)
+            var changed = false
+            val next = current.map { entry ->
+                if (catalogIdentityKey(entry.url) == targetKey && entry.posterUrl != normalizedPoster) {
+                    changed = true
+                    entry.copy(posterUrl = normalizedPoster)
+                } else {
+                    entry
+                }
+            }
+            if (changed) save(context, next)
+            return changed
+        }
+    }
+
+    private fun catalogIdentityKey(url: String): String {
+        val clean = url.trim().trimEnd('/')
+        val idx = clean.indexOf("/catalogue/", ignoreCase = true)
+        return if (idx >= 0) clean.substring(idx).lowercase() else clean
     }
 }

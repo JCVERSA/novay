@@ -18,7 +18,8 @@ data class AnimeSearchResult(
     val subtitle: String? = null,
     val isVf: Boolean = false,
     // Affiche du catalogue (URL absolue, résolue contre l'origine).
-    val posterUrl: String? = null
+    val posterUrl: String? = null,
+    val genres: List<String> = emptyList()
 )
 
 /** Une saison/film d'un anime (langue structurelle du sous-chemin). */
@@ -67,6 +68,46 @@ data class QualityOption(
     val playerIndex: Int
 )
 
+/**
+ * Une carte « À la une » du catalogue (carrousel de la page d'accueil) :
+ * l'animé mis en avant par le site, avec son synopsis et son lien direct
+ * de saison.
+ */
+data class CatalogHero(
+    val title: String,
+    /** « Saison 2 en cours » — libellé du badge du site, s'il existe. */
+    val seasonLabel: String? = null,
+    val genres: List<String> = emptyList(),
+    val synopsis: String? = null,
+    /** Lien direct du bouton « Visionner » (page de saison). */
+    val seasonUrl: String,
+    val posterUrl: String? = null,
+    /** Langue du lien (VF | VOSTFR), déduite du sous-chemin. */
+    val language: String? = null
+)
+
+/**
+ * Un animé récemment mis à jour sur la page d'accueil du catalogue :
+ * carte avec l'heure d'ajout et le lien de SA dernière saison.
+ */
+data class CatalogCard(
+    val title: String,
+    /** Page de l'animé (/catalogue/<slug>/). */
+    val animeUrl: String,
+    /** Dernière saison mise à jour (lien direct de la carte). */
+    val seasonUrl: String,
+    val posterUrl: String? = null,
+    /** Heure d'ajout affichée par le site (« 11h30 »). */
+    val timeLabel: String? = null,
+    val language: String? = null
+)
+
+/** Page d'accueil d'un catalogue : à la une + derniers ajouts. */
+data class CatalogHome(
+    val heroes: List<CatalogHero> = emptyList(),
+    val cards: List<CatalogCard> = emptyList()
+)
+
 /** Contrat commun à tous les catalogues. */
 interface AnimeSource {
     /** Nom affiché (ex. « anime-sama »). */
@@ -94,4 +135,24 @@ interface AnimeSource {
      */
     suspend fun streams(episode: AnimeEpisode): List<ResolvedStream> =
         listOf(stream(episode))
+
+    /**
+     * Page d'accueil du catalogue : animés à la une + derniers épisodes
+     * ajoutés. Un catalogue sans page d'accueil exploitable rend une
+     * liste vide — l'onglet retombe sur [featured]/la recherche seule.
+     */
+    suspend fun home(): CatalogHome = CatalogHome()
+
+    /** Genres normalisés de l'anime (lus depuis sa fiche quand disponibles). */
+    suspend fun genres(anime: AnimeSearchResult): List<String> = anime.genres
+
+    /** Catalogue filtré par genre (vide si non supporté par la source). */
+    suspend fun catalogByGenre(genre: String): List<AnimeSearchResult> = emptyList()
+
+    /**
+     * Résout l'affiche canonique depuis la fiche de l'animé quand [anime.posterUrl]
+     * est absente, cassée ou issue d'un miroir obsolète.
+     */
+    suspend fun resolvePosterUrl(anime: AnimeSearchResult): String? =
+        ImageUrlSanitizer.sanitizePosterUrl(anime.posterUrl)
 }
